@@ -175,10 +175,8 @@ Geçişin gerçek eski `update.sh` ile sınaması: `python3 test_pi_gecis.py` (s
 Eski Pi'ler kodu eski depo adresinden çeker; bu yüzden GitHub'daki depo **yeniden
 adlandırılır, yeni depo açılmaz**. GitHub eski adresi yeni adrese yönlendirir.
 
-**Yayın sırası:** depo, yeni kod gönderilmeden ÖNCE yeniden adlandırılır (`bootstrap.sh`
-yeni adresten klonlar, yeniden adlandırma yapılmadan yeni Pi kurulamaz). Yapılmadıysa
-geçen Pi kırılmaz: yeni adrese erişemezse `origin` değişmez, uyarı yazılır; sonraki
-güncelleme eski adresten sürer. Sunucuda `deploy/ad_gecisi.sh denetle` de bunu raporlar.
+Yeni adrese erişilemezse geçen Pi kırılmaz: `origin` değişmez, uyarı yazılır, sonraki
+güncelleme eski adresten sürer.
 
 ## Pulse Modu
 
