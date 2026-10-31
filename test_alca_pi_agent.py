@@ -12,7 +12,7 @@ gpiozero_module = types.ModuleType("gpiozero")
 gpiozero_module.DigitalInputDevice = object
 sys.modules.setdefault("gpiozero", gpiozero_module)
 
-from udar_pi_agent import DurationCycleDetector, PulseCycleDetector
+from alca_pi_agent import DurationCycleDetector, PulseCycleDetector
 
 
 class PulseCycleDetectorTests(unittest.TestCase):
@@ -164,7 +164,7 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
-from udar_pi_agent import Config, PersistentQueue, retry_delay, transport_payload
+from alca_pi_agent import Config, PersistentQueue, retry_delay, transport_payload
 
 
 def _config():
@@ -265,17 +265,17 @@ class EnvTests(unittest.TestCase):
     """Env dosyasında boş bırakılmış satır ajanı çökertmemeli."""
 
     ANAHTARLAR = (
-        "UDAR_POLL_INTERVAL_SECONDS", "UDAR_SEND_RETRY_BASE_SECONDS",
-        "UDAR_DURATION_DROPOUT_GRACE_SECONDS", "UDAR_QUEUE_DB", "UDAR_MEASUREMENT_MODE",
-        "UDAR_BOUNCE_SECONDS",
+        "ALCA_POLL_INTERVAL_SECONDS", "ALCA_SEND_RETRY_BASE_SECONDS",
+        "ALCA_DURATION_DROPOUT_GRACE_SECONDS", "ALCA_QUEUE_DB", "ALCA_MEASUREMENT_MODE",
+        "ALCA_BOUNCE_SECONDS",
     )
 
     def setUp(self):
         import os
         self._os = os
-        self._eski = {k: os.environ.get(k) for k in self.ANAHTARLAR + ("UDAR_CRM_URL", "UDAR_DEVICE_TOKEN")}
-        os.environ["UDAR_CRM_URL"] = "https://ornek.test"
-        os.environ["UDAR_DEVICE_TOKEN"] = "test"
+        self._eski = {k: os.environ.get(k) for k in self.ANAHTARLAR + ("ALCA_CRM_URL", "ALCA_DEVICE_TOKEN")}
+        os.environ["ALCA_CRM_URL"] = "https://ornek.test"
+        os.environ["ALCA_DEVICE_TOKEN"] = "test"
 
     def tearDown(self):
         for k, v in self._eski.items():
@@ -285,38 +285,38 @@ class EnvTests(unittest.TestCase):
                 self._os.environ[k] = v
 
     def test_bos_birakilan_ayarlar_ondegere_duser(self):
-        from udar_pi_agent import load_config
+        from alca_pi_agent import load_config
         for k in self.ANAHTARLAR:
             self._os.environ[k] = ""
         config = load_config()   # eskiden burada float("") ile çöküyordu
         self.assertEqual(config.poll_interval_seconds, 0.002)
         self.assertEqual(config.send_retry_base_seconds, 5.0)
         self.assertEqual(config.duration_dropout_grace_seconds, 1.50)
-        self.assertEqual(str(config.queue_db), "/var/lib/udar-pi-agent/machine_events.sqlite3")
+        self.assertEqual(str(config.queue_db), "/var/lib/alca-pi-agent/machine_events.sqlite3")
         self.assertEqual(config.measurement_mode, "pulse")
 
     def test_bozuk_sayi_traceback_degil_ne_yapilacagini_soyler(self):
         # 2026-09-21 saha arizasi: tek satirlik kurulumda sihirbaz betigin kendi
         # satirlarini cevap sandi ve bu degeri yazdi; ajan her acilista traceback
         # verip coktu. Artik ayarin adini ve duzeltme komutunu soyluyor.
-        from udar_pi_agent import load_config
-        self._os.environ["UDAR_PULSE_REARM_SECONDS"] = 'echo "  sudo systemctl restart udar-pi-agent"'
+        from alca_pi_agent import load_config
+        self._os.environ["ALCA_PULSE_REARM_SECONDS"] = 'echo "  sudo systemctl restart alca-pi-agent"'
         try:
             with self.assertRaises(SystemExit) as ctx:
                 load_config()
         finally:
-            self._os.environ.pop("UDAR_PULSE_REARM_SECONDS", None)
+            self._os.environ.pop("ALCA_PULSE_REARM_SECONDS", None)
         mesaj = str(ctx.exception.code)
-        self.assertIn("UDAR_PULSE_REARM_SECONDS", mesaj)
+        self.assertIn("ALCA_PULSE_REARM_SECONDS", mesaj)
         self.assertIn("install.sh --configure", mesaj)
 
     def test_kullanilmayan_bounce_ayari_ajani_cokertmez(self):
-        # UDAR_BOUNCE_SECONDS Temmuz 2026'dan (391b844) beri kullanilmiyor; daha
+        # ALCA_BOUNCE_SECONDS Temmuz 2026'dan (391b844) beri kullanilmiyor; daha
         # eski ajanda gpiozero Button bounce_time idi. 2026-09-21'deki cop deger
         # tam da bu anahtara yazilmisti; kullanilmayan bir ayar yuzunden ajan
         # acilmamazlik etmemeli.
-        from udar_pi_agent import load_config
-        self._os.environ["UDAR_BOUNCE_SECONDS"] = 'echo "  sudo systemctl restart udar-pi-agent"'
+        from alca_pi_agent import load_config
+        self._os.environ["ALCA_BOUNCE_SECONDS"] = 'echo "  sudo systemctl restart alca-pi-agent"'
         config = load_config()
         self.assertFalse(hasattr(config, "bounce_time"))
 
@@ -343,12 +343,13 @@ import shutil
 import subprocess
 import threading
 from contextlib import contextmanager
+from dataclasses import fields
 from datetime import datetime, timezone
 from unittest import mock
 
 import diagnose_gpio
-import udar_pi_agent
-from udar_pi_agent import (
+import alca_pi_agent
+from alca_pi_agent import (
     AGENT_VERSION,
     DEFAULT_PULSE_MIN_INTERVAL_SECONDS,
     ClockSyncMonitor,
@@ -366,18 +367,18 @@ BURASI = Path(__file__).resolve().parent
 
 @contextmanager
 def _ortam(**degerler):
-    """Yalnız verilen UDAR_* ayarlarıyla çalıştırır; diğer UDAR_* ayarları yok sayılır."""
-    temiz = {k: v for k, v in os.environ.items() if not k.startswith("UDAR_")}
-    temiz.update({"UDAR_CRM_URL": "https://ornek.test", "UDAR_DEVICE_TOKEN": "test"})
+    """Yalnız verilen ALCA_* ayarlarıyla çalıştırır; diğer ALCA_*/UDAR_* ayarları yok sayılır."""
+    temiz = {k: v for k, v in os.environ.items() if not k.startswith(("ALCA_", "UDAR_"))}
+    temiz.update({"ALCA_CRM_URL": "https://ornek.test", "ALCA_DEVICE_TOKEN": "test"})
     temiz.update(degerler)
     with mock.patch.dict(os.environ, temiz, clear=True):
         yield
 
 
 def _env_ornegi():
-    """udar-pi-agent.env.example içindeki (yorum olmayan) KEY=VALUE satırları."""
+    """alca-pi-agent.env.example içindeki (yorum olmayan) KEY=VALUE satırları."""
     ayarlar = {}
-    for satir in (BURASI / "udar-pi-agent.env.example").read_text(encoding="utf-8").splitlines():
+    for satir in (BURASI / "alca-pi-agent.env.example").read_text(encoding="utf-8").splitlines():
         satir = satir.strip()
         if satir and not satir.startswith("#") and "=" in satir:
             anahtar, deger = satir.split("=", 1)
@@ -408,14 +409,14 @@ class OndegerTests(unittest.TestCase):
 
     def test_ornek_env_dosyasi_ayni_ondegerleri_yazar(self):
         ornek = _env_ornegi()
-        self.assertEqual(ornek["UDAR_PULL_UP"], "false")
-        self.assertEqual(ornek["UDAR_PULSE_EDGE"], "rising")
-        self.assertEqual(float(ornek["UDAR_PULSE_MIN_ACTIVE_SECONDS"]), 0.02)
-        self.assertEqual(float(ornek["UDAR_PULSE_REARM_SECONDS"]), 0.20)
-        self.assertEqual(float(ornek["UDAR_PULSE_MAX_ACTIVE_SECONDS"]), 10.0)
-        self.assertEqual(float(ornek["UDAR_PULSE_MIN_INTERVAL_SECONDS"]), 0.20)
+        self.assertEqual(ornek["ALCA_PULL_UP"], "false")
+        self.assertEqual(ornek["ALCA_PULSE_EDGE"], "rising")
+        self.assertEqual(float(ornek["ALCA_PULSE_MIN_ACTIVE_SECONDS"]), 0.02)
+        self.assertEqual(float(ornek["ALCA_PULSE_REARM_SECONDS"]), 0.20)
+        self.assertEqual(float(ornek["ALCA_PULSE_MAX_ACTIVE_SECONDS"]), 10.0)
+        self.assertEqual(float(ornek["ALCA_PULSE_MIN_INTERVAL_SECONDS"]), 0.20)
         # Kullanılmayan ayar yeni kurulumlara yazılmaz.
-        self.assertNotIn("UDAR_BOUNCE_SECONDS", ornek)
+        self.assertNotIn("ALCA_BOUNCE_SECONDS", ornek)
 
 
 class KenarBelgesiTests(unittest.TestCase):
@@ -442,12 +443,12 @@ class KenarBelgesiTests(unittest.TestCase):
         self.assertEqual(len(kabul), 1, "iki değişimli tek çevrim tek vuruş olmalı")
 
     def test_eski_both_ayari_hala_kabul_edilir(self):
-        with _ortam(UDAR_PULSE_EDGE="both"):
+        with _ortam(ALCA_PULSE_EDGE="both"):
             self.assertEqual(load_config().pulse_edge, "both")
 
     def test_belgeler_eski_yanlis_aciklamayi_tasimaz(self):
         yanlislar = ("count every state change", "her 0/1 degisimini say", "her değişimi say")
-        for dosya in ("udar-pi-agent.env.example", "install.sh", "README.md"):
+        for dosya in ("alca-pi-agent.env.example", "install.sh", "README.md"):
             metin = (BURASI / dosya).read_text(encoding="utf-8")
             for yanlis in yanlislar:
                 with self.subTest(dosya=dosya, yanlis=yanlis):
@@ -498,7 +499,7 @@ class SurecKilidiTests(unittest.TestCase):
         mesaj = str(ctx.exception.code)
         self.assertIn("AJAN ZATEN CALISIYOR", mesaj)
         self.assertIn(str(os.getpid()), mesaj)
-        self.assertIn("pgrep -af udar_pi_agent", mesaj)
+        self.assertIn("pgrep -af alca_pi_agent", mesaj)
 
     def test_ajan_durunca_kilit_kendiliginden_birakilir(self):
         acquire_single_instance_lock(self.db).close()
@@ -513,8 +514,8 @@ class SurecKilidiTests(unittest.TestCase):
             "    m = types.ModuleType(ad); m.__dict__.update(oz); sys.modules.setdefault(ad, m)\n"
             f"sys.path.insert(0, {str(BURASI)!r})\n"
             "from pathlib import Path\n"
-            "import udar_pi_agent\n"
-            "kilit = udar_pi_agent.acquire_single_instance_lock(Path(sys.argv[1]))\n"
+            "import alca_pi_agent\n"
+            "kilit = alca_pi_agent.acquire_single_instance_lock(Path(sys.argv[1]))\n"
             "print('hazir', flush=True)\n"
             "sys.stdin.read()\n"
         )
@@ -676,7 +677,7 @@ class GonderimAlanlariTests(unittest.TestCase):
                 dur.set()
                 return types.SimpleNamespace(status_code=201, text="{}", headers={})
 
-        with mock.patch.object(udar_pi_agent.requests, "Session", SahteOturum):
+        with mock.patch.object(alca_pi_agent.requests, "Session", SahteOturum):
             sender_loop(_config(), kuyruk, dur)
 
         self.assertEqual(len(gonderilen), 1)
@@ -761,7 +762,7 @@ def _ozet_metni(ozet, mevcut, onerilen, *, ayar=ONDEGER_AYAR, is_sayisi=None):
 
 def _acik_ayar_satirlari(metin):
     """Ayar dosyasına yapıştırılınca etkisi olacak (yorum olmayan) satırlar."""
-    return [satir for satir in metin.splitlines() if satir.startswith("UDAR_PULSE_")]
+    return [satir for satir in metin.splitlines() if satir.startswith("ALCA_PULSE_")]
 
 
 def _kopmali_sinyal(an):
@@ -847,16 +848,16 @@ class OlcumOnerisiTests(unittest.TestCase):
         self.assertAlmostEqual(ozet["aralik"][0], 3.0)
         self.assertFalse(ozet["hizli"])
         oneri = ozet["oneri"]
-        self.assertAlmostEqual(oneri["UDAR_PULSE_MIN_ACTIVE_SECONDS"], 0.15)
-        self.assertAlmostEqual(oneri["UDAR_PULSE_REARM_SECONDS"], 0.50)  # 2,7/2 -> en çok 0,50
-        self.assertAlmostEqual(oneri["UDAR_PULSE_MAX_ACTIVE_SECONDS"], 10.0)
-        self.assertAlmostEqual(oneri["UDAR_PULSE_MIN_INTERVAL_SECONDS"], 1.5)
+        self.assertAlmostEqual(oneri["ALCA_PULSE_MIN_ACTIVE_SECONDS"], 0.15)
+        self.assertAlmostEqual(oneri["ALCA_PULSE_REARM_SECONDS"], 0.50)  # 2,7/2 -> en çok 0,50
+        self.assertAlmostEqual(oneri["ALCA_PULSE_MAX_ACTIVE_SECONDS"], 10.0)
+        self.assertAlmostEqual(oneri["ALCA_PULSE_MIN_INTERVAL_SECONDS"], 1.5)
 
     def test_hizli_makinede_oneri_cevrimi_asmaz_ve_uyarir(self):
         ozet = diagnose_gpio.olcum_ozeti(_cevrimler(20, aralik=0.2, aktif=0.05))
         self.assertTrue(ozet["hizli"])
-        self.assertLess(ozet["oneri"]["UDAR_PULSE_MIN_INTERVAL_SECONDS"], 0.2)
-        self.assertLess(ozet["oneri"]["UDAR_PULSE_REARM_SECONDS"], 0.15)
+        self.assertLess(ozet["oneri"]["ALCA_PULSE_MIN_INTERVAL_SECONDS"], 0.2)
+        self.assertLess(ozet["oneri"]["ALCA_PULSE_REARM_SECONDS"], 0.15)
 
     def test_olcum_suzgeci_sicramayi_cevrim_saymaz(self):
         # 1 ms örneklemeli yapay sinyal: 3 sn'de bir 0,3 sn aktif; her aktifin
@@ -873,19 +874,19 @@ class OlcumOnerisiTests(unittest.TestCase):
 
     def test_ayar_dosyasi_okunur(self):
         with tempfile.TemporaryDirectory() as klasor:
-            yol = Path(klasor) / "udar-pi-agent.env"
-            yol.write_text('# yorum\n\nUDAR_GPIO_BCM=17\nUDAR_NOTE="GPIO17 deneme"\nUDAR_LINE_ID=\n', encoding="utf-8")
+            yol = Path(klasor) / "alca-pi-agent.env"
+            yol.write_text('# yorum\n\nALCA_GPIO_BCM=17\nALCA_NOTE="GPIO17 deneme"\nALCA_LINE_ID=\n', encoding="utf-8")
             self.assertEqual(
                 diagnose_gpio.ayar_dosyasini_oku(yol),
-                {"UDAR_GPIO_BCM": "17", "UDAR_NOTE": "GPIO17 deneme", "UDAR_LINE_ID": ""},
+                {"ALCA_GPIO_BCM": "17", "ALCA_NOTE": "GPIO17 deneme", "ALCA_LINE_ID": ""},
             )
             self.assertIsNone(diagnose_gpio.ayar_dosyasini_oku(Path(klasor) / "yok.env"))
 
     def test_komut_satiri_dosyayi_ezer_dosya_ondegeri(self):
         args = argparse.Namespace(pin=None, pull_up=None, edge=None, min_active=0.1, rearm=None,
                                   max_active=None, min_interval=None)
-        dosya = {"UDAR_GPIO_BCM": "17", "UDAR_PULL_UP": "true", "UDAR_PULSE_EDGE": "falling",
-                 "UDAR_PULSE_MIN_ACTIVE_SECONDS": "0.05", "UDAR_PULSE_REARM_SECONDS": "0.5"}
+        dosya = {"ALCA_GPIO_BCM": "17", "ALCA_PULL_UP": "true", "ALCA_PULSE_EDGE": "falling",
+                 "ALCA_PULSE_MIN_ACTIVE_SECONDS": "0.05", "ALCA_PULSE_REARM_SECONDS": "0.5"}
         ayar = diagnose_gpio.ayarlari_belirle(args, dosya)
         self.assertEqual(
             ayar,
@@ -921,11 +922,11 @@ class SaglamOneriTests(unittest.TestCase):
         self.assertEqual(mevcut, 21)
         self.assertEqual(onerilen, 21, "önerilen ayarla ajan işleri iki kez saymamalı")
         self.assertEqual(diagnose_gpio.gevseten_oneriler(ozet["oneri"], ONDEGER_AYAR), {})
-        self.assertAlmostEqual(ozet["oneri"]["UDAR_PULSE_REARM_SECONDS"], 0.50)
-        self.assertAlmostEqual(ozet["oneri"]["UDAR_PULSE_MIN_INTERVAL_SECONDS"], 1.5)
+        self.assertAlmostEqual(ozet["oneri"]["ALCA_PULSE_REARM_SECONDS"], 0.50)
+        self.assertAlmostEqual(ozet["oneri"]["ALCA_PULSE_MIN_INTERVAL_SECONDS"], 1.5)
         # Ajan aktifliğin KESİNTİSİZ sürmesini ister: öneri toplam 0,30'dan değil
         # en uzun kesintisiz parçadan (0,144) gelir; yoksa ajan hiçbirini saymazdı.
-        self.assertLess(ozet["oneri"]["UDAR_PULSE_MIN_ACTIVE_SECONDS"], 0.14)
+        self.assertLess(ozet["oneri"]["ALCA_PULSE_MIN_ACTIVE_SECONDS"], 0.14)
         metin = _ozet_metni(ozet, mevcut, onerilen)
         self.assertNotIn("farkli", metin)
         self.assertIn("olcumle ayni (21)", metin)
@@ -942,7 +943,7 @@ class SaglamOneriTests(unittest.TestCase):
         self.assertEqual(ozet["cevrim"], 20)
         self.assertEqual(ozet["parazit"][0], 5)
         self.assertEqual((mevcut, onerilen), (20, 20))
-        self.assertGreaterEqual(ozet["oneri"]["UDAR_PULSE_MIN_ACTIVE_SECONDS"], 0.02)
+        self.assertGreaterEqual(ozet["oneri"]["ALCA_PULSE_MIN_ACTIVE_SECONDS"], 0.02)
         self.assertEqual(diagnose_gpio.gevseten_oneriler(ozet["oneri"], ONDEGER_AYAR), {})
         self.assertNotIn("farkli", _ozet_metni(ozet, mevcut, onerilen))
 
@@ -951,8 +952,8 @@ class SaglamOneriTests(unittest.TestCase):
         parcalar = sorted(_cevrimler(20, aralik=3.0, aktif=0.3) + [(25.9, 26.2)])
         ozet = diagnose_gpio.olcum_ozeti(parcalar)
         self.assertEqual(ozet["cevrim"], 21)
-        self.assertAlmostEqual(ozet["oneri"]["UDAR_PULSE_MIN_INTERVAL_SECONDS"], 1.5)
-        self.assertAlmostEqual(ozet["oneri"]["UDAR_PULSE_REARM_SECONDS"], 0.50)
+        self.assertAlmostEqual(ozet["oneri"]["ALCA_PULSE_MIN_INTERVAL_SECONDS"], 1.5)
+        self.assertAlmostEqual(ozet["oneri"]["ALCA_PULSE_REARM_SECONDS"], 0.50)
 
     def test_alt_yuzdelik_en_kucugu_hic_tek_basina_kullanmaz(self):
         self.assertEqual(diagnose_gpio.alt_yuzdelik([0.01] + [3.0] * 9), 3.0)
@@ -1003,7 +1004,7 @@ class SaglamOneriTests(unittest.TestCase):
         self.assertEqual(mevcut, 0)
         self.assertEqual(onerilen, ozet["cevrim"])
         gevsek = diagnose_gpio.gevseten_oneriler(ozet["oneri"], ONDEGER_AYAR)
-        self.assertIn("UDAR_PULSE_REARM_SECONDS", gevsek)
+        self.assertIn("ALCA_PULSE_REARM_SECONDS", gevsek)
         metin = _ozet_metni(ozet, mevcut, onerilen)
         self.assertIn("DOGRUDAN GIRMEYIN", metin)
         self.assertIn("GEVSETIR", metin)
@@ -1011,7 +1012,7 @@ class SaglamOneriTests(unittest.TestCase):
         # Gerçek iş sayısı ajanın işleri kaçırdığını ve önerinin doğru saydığını gösterirse girilir.
         metin = _ozet_metni(ozet, mevcut, onerilen, is_sayisi=ozet["cevrim"])
         self.assertIn("AYNEN", metin)
-        self.assertIn("UDAR_PULSE_REARM_SECONDS=0.07", _acik_ayar_satirlari(metin))
+        self.assertIn("ALCA_PULSE_REARM_SECONDS=0.07", _acik_ayar_satirlari(metin))
 
     def test_ajan_farkli_sayinca_hatali_ilan_edilmez(self):
         ozet = diagnose_gpio.olcum_ozeti(_cevrimler(20, aralik=3.0, aktif=0.3))
@@ -1099,7 +1100,7 @@ class SaglamOneriTests(unittest.TestCase):
                 if saat[0] > bitis:
                     raise KeyboardInterrupt
 
-        argv = ["diagnose_gpio.py", "--ayar-dosyasi", "/yok/udar-pi-agent.env", "--is-sayisi", "21"]
+        argv = ["diagnose_gpio.py", "--ayar-dosyasi", "/yok/alca-pi-agent.env", "--is-sayisi", "21"]
         cikti = io.StringIO()
         with mock.patch.object(diagnose_gpio, "DigitalInputDevice", SahtePin), \
                 mock.patch.object(diagnose_gpio, "time", SahteZaman), \
@@ -1163,7 +1164,7 @@ class DagilimAyiklamaTests(unittest.TestCase):
         metin = _ozet_metni(ozet, mevcut, onerilen, is_sayisi=120)
         self.assertIn("Ajan MEVCUT ayarla 12 sayiyor: 108 EKSIK", metin)
         self.assertIn("AYNEN", metin)
-        self.assertIn("UDAR_PULSE_REARM_SECONDS=0.07", _acik_ayar_satirlari(metin))
+        self.assertIn("ALCA_PULSE_REARM_SECONDS=0.07", _acik_ayar_satirlari(metin))
 
     def test_kisa_darbede_uzun_basis_gercek_darbeleri_parazit_yapmaz(self):
         for uzunlar in ({12}, {3, 9, 15, 21}):
@@ -1280,9 +1281,9 @@ class KayitSekliTests(unittest.TestCase):
 
         kuyruk = PersistentQueue(Path(self._tmp.name) / f"{config.measurement_mode}.sqlite3",
                                  boot_id="test", monotonic=lambda: saat[0])
-        calistir = udar_pi_agent.run_pulse_mode if config.measurement_mode == "pulse" else udar_pi_agent.run_duration_mode
-        with mock.patch.object(udar_pi_agent, "DigitalInputDevice", SahtePin), \
-                mock.patch.object(udar_pi_agent, "time", SahteZaman), \
+        calistir = alca_pi_agent.run_pulse_mode if config.measurement_mode == "pulse" else alca_pi_agent.run_duration_mode
+        with mock.patch.object(alca_pi_agent, "DigitalInputDevice", SahtePin), \
+                mock.patch.object(alca_pi_agent, "time", SahteZaman), \
                 contextlib.redirect_stdout(io.StringIO()):
             calistir(config, kuyruk, SanalDurdurma())
         with sqlite3.connect(kuyruk.db_path) as conn:
@@ -1321,28 +1322,239 @@ class KayitSekliTests(unittest.TestCase):
                         "`measured_by_version`"):
             with self.subTest(gerekli=gerekli):
                 self.assertIn(gerekli, bolum)
-        ajan = (BURASI / "udar_pi_agent.py").read_text(encoding="utf-8")
+        ajan = (BURASI / "alca_pi_agent.py").read_text(encoding="utf-8")
         self.assertIn("counter.mode == 'pulse'", ajan)
 
 
 class BounceNotuTests(unittest.TestCase):
-    """UDAR_BOUNCE_SECONDS notu tarihsel olarak doğru: 391b844 öncesi ajan onu kullanıyordu."""
+    """ALCA_BOUNCE_SECONDS notu tarihsel olarak doğru: 391b844 öncesi ajan onu kullanıyordu."""
 
     def test_hicbir_zaman_kullanilmadi_denmez(self):
         yanlislar = ("hicbir zaman kullan", "hiçbir zaman kullan", "hic kullanmadi", "hic etkisi yoktu")
-        for dosya in ("README.md", "udar-pi-agent.env.example", "install.sh", "udar_pi_agent.py"):
+        for dosya in ("README.md", "alca-pi-agent.env.example", "install.sh", "alca_pi_agent.py"):
             metin = (BURASI / dosya).read_text(encoding="utf-8")
             for yanlis in yanlislar:
                 with self.subTest(dosya=dosya, yanlis=yanlis):
                     self.assertNotIn(yanlis, metin)
 
     def test_not_tarihi_ve_eski_kullanimi_soyler(self):
-        for dosya in ("README.md", "udar-pi-agent.env.example"):
+        for dosya in ("README.md", "alca-pi-agent.env.example"):
             metin = (BURASI / dosya).read_text(encoding="utf-8")
             with self.subTest(dosya=dosya):
                 self.assertIn("Temmuz 2026", metin)
                 self.assertIn("391b844", metin)
                 self.assertIn("bounce_time", metin)
+
+
+class EskiOnekTests(unittest.TestCase):
+    """Sahadaki eski env dosyası UDAR_ önekli (geriye dönük uyumluluk).
+
+    install.sh tek seferde geçirir; ajan yine de eski ayarla tek başına çalışmalı.
+    Önce ALCA_X, yoksa ya da boşsa UDAR_X. Geçişin kendisi: test_pi_gecis.py.
+    """
+
+    # load_config'in okuduğu HER anahtar, öndeğerinden farklı bir değerle.
+    DEGERLER = {
+        "CRM_URL": "https://ornek.test",
+        "DEVICE_TOKEN": "cihaz-tokeni",
+        "GPIO_BCM": "5",
+        "PULL_UP": "true",
+        "HTTP_TIMEOUT": "9",
+        "QUEUE_DB": "/tmp/ornek/kuyruk.sqlite3",
+        "MEASUREMENT_MODE": "duration",
+        "PULSE_EDGE": "falling",
+        "POLL_INTERVAL_SECONDS": "0.01",
+        "PULSE_MIN_ACTIVE_SECONDS": "0.03",
+        "PULSE_REARM_SECONDS": "0.3",
+        "PULSE_MAX_ACTIVE_SECONDS": "11",
+        "PULSE_MIN_INTERVAL_SECONDS": "0.4",
+        "DURATION_UNIT": "minutes",
+        "MIN_DURATION_SECONDS": "1.1",
+        "DURATION_START_STABLE_SECONDS": "0.5",
+        "DURATION_STOP_STABLE_SECONDS": "0.6",
+        "DURATION_DROPOUT_GRACE_SECONDS": "2.5",
+        "DURATION_DROPOUT_LOG_INTERVAL_SECONDS": "31",
+        "DURATION_ACTIVE_LEVEL": "low",
+        "DAILY_RESET": "false",
+        "LINE_ID": "12",
+        "STATION_CODE": "M-01",
+        "OPERATOR_ID": "7",
+        "NOTE": "deneme notu",
+        "SEND_RETRY_BASE_SECONDS": "6",
+        "SEND_RETRY_VALIDATION_SECONDS": "61",
+        "SEND_RETRY_MAX_SECONDS": "301",
+    }
+
+    @staticmethod
+    def _yalniz(**degerler):
+        return mock.patch.dict(os.environ, degerler, clear=True)
+
+    def _onekli(self, onek, degerler=None):
+        return {onek + k: v for k, v in (degerler or self.DEGERLER).items()}
+
+    def test_liste_ajanin_okudugu_her_anahtari_kapsar(self):
+        metin = (BURASI / "alca_pi_agent.py").read_text(encoding="utf-8")
+        okunan = set(re.findall(r'env\(\s*"ALCA_([A-Z_]+)"', metin)) - {"BOUNCE_SECONDS"}
+        self.assertEqual(okunan, set(self.DEGERLER))
+
+    def test_her_anahtar_eski_onekle_de_okunur(self):
+        with self._yalniz(**self._onekli("ALCA_")):
+            yeni = load_config()
+        with self._yalniz(**self._onekli("UDAR_")):
+            eski = load_config()
+        self.assertEqual(eski, yeni)
+        # Eşitlik öndeğerlerden gelmesin: her alan öndeğerinden farklı okunmuş olmalı.
+        ondeger = Config(crm_url="x", device_token="y")
+        for alan in fields(Config):
+            with self.subTest(alan=alan.name):
+                self.assertNotEqual(getattr(eski, alan.name), getattr(ondeger, alan.name))
+
+    def test_ikisi_de_varsa_yeni_onek_kazanir(self):
+        # Eski tarafta hepsi öndeğerler: tek bir anahtar bile eskiden okunursa eşitlik bozulur.
+        with self._yalniz(**self._onekli("ALCA_")):
+            yalniz_yeni = load_config()
+        eski = self._onekli("UDAR_", {k: "bozuk-eski-deger" for k in self.DEGERLER})
+        with self._yalniz(**eski, **self._onekli("ALCA_")):
+            self.assertEqual(load_config(), yalniz_yeni)
+
+    def test_yanlis_degeri_yeni_onekte_de_kazanir_bool(self):
+        with self._yalniz(ALCA_CRM_URL="u", ALCA_DEVICE_TOKEN="t",
+                          ALCA_PULL_UP="false", UDAR_PULL_UP="true",
+                          ALCA_DAILY_RESET="false", UDAR_DAILY_RESET="true"):
+            config = load_config()
+        self.assertFalse(config.pull_up)
+        self.assertFalse(config.daily_reset)
+
+    def test_bos_yeni_anahtar_yokmus_gibidir_eskiye_duser(self):
+        with self._yalniz(ALCA_CRM_URL="", UDAR_CRM_URL="https://eski.test",
+                          ALCA_DEVICE_TOKEN="  ", UDAR_DEVICE_TOKEN="eski-token",
+                          ALCA_GPIO_BCM="", UDAR_GPIO_BCM="6",
+                          ALCA_PULL_UP="", UDAR_PULL_UP="true",
+                          ALCA_HTTP_TIMEOUT="", UDAR_HTTP_TIMEOUT="8"):
+            config = load_config()
+        self.assertEqual(config.crm_url, "https://eski.test")
+        self.assertEqual(config.device_token, "eski-token")
+        self.assertEqual(config.gpio_bcm, 6)
+        self.assertTrue(config.pull_up)
+        self.assertEqual(config.timeout, 8.0)
+
+    def test_iki_onek_de_bossa_ondeger(self):
+        with self._yalniz(UDAR_CRM_URL="https://eski.test", UDAR_DEVICE_TOKEN="t",
+                          ALCA_GPIO_BCM="", UDAR_GPIO_BCM="",
+                          ALCA_POLL_INTERVAL_SECONDS=" ", UDAR_POLL_INTERVAL_SECONDS=" ",
+                          UDAR_SEND_RETRY_BASE_SECONDS="", UDAR_DAILY_RESET="",
+                          UDAR_MEASUREMENT_MODE="", UDAR_NOTE=""):
+            config = load_config()
+        self.assertEqual(config.gpio_bcm, 17)
+        self.assertEqual(config.poll_interval_seconds, 0.002)
+        self.assertEqual(config.send_retry_base_seconds, 5.0)
+        self.assertTrue(config.daily_reset)
+        self.assertEqual(config.measurement_mode, "pulse")
+        self.assertEqual(config.note, "GPIO event")
+
+    def test_zorunlu_ayar_iki_onekte_de_yoksa_durur(self):
+        with self._yalniz(ALCA_CRM_URL="", UDAR_CRM_URL=""):
+            with self.assertRaises(SystemExit) as ctx:
+                load_config()
+        self.assertIn("ALCA_CRM_URL", str(ctx.exception.code))
+
+    def test_bozuk_sayi_mesaji_dosyadaki_anahtari_soyler(self):
+        for anahtar, cagri in (
+            ("UDAR_GPIO_BCM", lambda: alca_pi_agent.int_env("ALCA_GPIO_BCM", "17")),
+            ("UDAR_HTTP_TIMEOUT", lambda: alca_pi_agent.float_env("ALCA_HTTP_TIMEOUT", "5")),
+        ):
+            with self.subTest(anahtar=anahtar), self._yalniz(**{anahtar: "cop"}):
+                with self.assertRaises(SystemExit) as ctx:
+                    cagri()
+                self.assertIn(anahtar, str(ctx.exception.code))
+                self.assertIn("install.sh --configure", str(ctx.exception.code))
+
+    def test_bozuk_eski_deger_yeni_anahtar_varken_okunmaz(self):
+        with self._yalniz(ALCA_GPIO_BCM="4", UDAR_GPIO_BCM="cop"):
+            self.assertEqual(alca_pi_agent.int_env("ALCA_GPIO_BCM", "17"), 4)
+
+    def test_bounce_uyarisi_iki_adla_da(self):
+        with self._yalniz():
+            self.assertIsNone(alca_pi_agent.bounce_notu())
+        with self._yalniz(ALCA_BOUNCE_SECONDS=""):
+            self.assertIsNone(alca_pi_agent.bounce_notu())
+        with self._yalniz(UDAR_BOUNCE_SECONDS="0.2"):
+            self.assertIn("UDAR_BOUNCE_SECONDS", alca_pi_agent.bounce_notu())
+        with self._yalniz(ALCA_BOUNCE_SECONDS="0.2"):
+            self.assertIn("ALCA_BOUNCE_SECONDS", alca_pi_agent.bounce_notu())
+        # Bozuk değer ajanı çökertmez (21 Eylül) ve config'e girmez.
+        with self._yalniz(UDAR_CRM_URL="u", UDAR_DEVICE_TOKEN="t", UDAR_BOUNCE_SECONDS="cop"):
+            self.assertFalse(hasattr(load_config(), "bounce_time"))
+
+    def test_env_dosyasi_once_yeni_yoksa_eski(self):
+        with tempfile.TemporaryDirectory() as klasor:
+            yeni, eski = Path(klasor) / "yeni.env", Path(klasor) / "eski.env"
+            self.assertEqual(alca_pi_agent.yeni_yoksa_eski(str(yeni), str(eski)), str(yeni))
+            eski.write_text("")
+            self.assertEqual(alca_pi_agent.yeni_yoksa_eski(str(yeni), str(eski)), str(eski))
+            yeni.write_text("")
+            self.assertEqual(alca_pi_agent.yeni_yoksa_eski(str(yeni), str(eski)), str(yeni))
+        self.assertIn(alca_pi_agent.ENV_DOSYASI, {"/etc/alca-pi-agent.env", "/etc/udar-pi-agent.env"})
+
+    def test_kuyruk_yolu_verilmemisse_eski_kuyruk_kaybolmaz(self):
+        with tempfile.TemporaryDirectory() as klasor:
+            yeni, eski = Path(klasor) / "yeni" / "q.db", Path(klasor) / "eski" / "q.db"
+            eski.parent.mkdir()
+            with self._yalniz(UDAR_CRM_URL="u", UDAR_DEVICE_TOKEN="t"), \
+                    mock.patch.object(alca_pi_agent, "KUYRUK_DOSYASI", str(yeni)), \
+                    mock.patch.object(alca_pi_agent, "ESKI_KUYRUK_DOSYASI", str(eski)):
+                self.assertEqual(load_config().queue_db, yeni)   # ikisi de yok
+                eski.write_text("")
+                self.assertEqual(load_config().queue_db, eski)   # yalnız eski var
+                yeni.parent.mkdir()
+                yeni.write_text("")
+                self.assertEqual(load_config().queue_db, yeni)   # ikisi de var
+
+    def test_verilen_kuyruk_yoluna_saygi_duyulur(self):
+        with self._yalniz(UDAR_CRM_URL="u", UDAR_DEVICE_TOKEN="t", UDAR_QUEUE_DB="/data/eski.db"):
+            self.assertEqual(str(load_config().queue_db), "/data/eski.db")
+        with self._yalniz(UDAR_CRM_URL="u", UDAR_DEVICE_TOKEN="t", UDAR_QUEUE_DB="/data/eski.db",
+                          ALCA_QUEUE_DB="/data/yeni.db"):
+            self.assertEqual(str(load_config().queue_db), "/data/yeni.db")
+
+    def test_teshis_araci_eski_ayar_dosyasini_okur(self):
+        args = argparse.Namespace(pin=None, pull_up=None, edge=None, min_active=None, rearm=None,
+                                  max_active=None, min_interval=None)
+        dosya = {"UDAR_GPIO_BCM": "17", "UDAR_PULL_UP": "true", "UDAR_PULSE_EDGE": "falling",
+                 "UDAR_PULSE_MIN_ACTIVE_SECONDS": "0.05", "UDAR_PULSE_REARM_SECONDS": "0.5",
+                 "UDAR_PULSE_MAX_ACTIVE_SECONDS": "12", "UDAR_PULSE_MIN_INTERVAL_SECONDS": "0.3"}
+        beklenen = {"pin": 17, "pull_up": True, "edge": "falling", "min_active": 0.05, "rearm": 0.5,
+                    "max_active": 12.0, "min_interval": 0.3}
+        self.assertEqual(diagnose_gpio.ayarlari_belirle(args, dosya), beklenen)
+        # İkisi de varsa yeni önek kazanır; yeni anahtar boşsa eskisi okunur.
+        dosya.update(ALCA_GPIO_BCM="22", ALCA_PULL_UP="false", ALCA_PULSE_EDGE="", ALCA_PULSE_REARM_SECONDS="")
+        self.assertEqual(
+            diagnose_gpio.ayarlari_belirle(args, dosya),
+            {**beklenen, "pin": 22, "pull_up": False},
+        )
+
+    def test_teshis_araci_bozuk_eski_degerde_anahtari_soyler(self):
+        cikti = io.StringIO()
+        with contextlib.redirect_stdout(cikti):
+            self.assertEqual(diagnose_gpio._dosyadan_sayi({"UDAR_GPIO_BCM": "cop"}, "ALCA_GPIO_BCM", 27), 27)
+        self.assertIn("UDAR_GPIO_BCM", cikti.getvalue())
+
+    def test_taze_kurulum_dosyalarinda_eski_ad_yok(self):
+        for dosya in ("alca-pi-agent.env.example", "alca-pi-agent.service"):
+            with self.subTest(dosya=dosya):
+                self.assertNotIn("udar", (BURASI / dosya).read_text(encoding="utf-8").lower())
+
+    def test_surum_artti_sunucu_alani_ayni(self):
+        self.assertGreater(AGENT_VERSION, "2026.09.30")
+        config = Config(crm_url="https://x.test", device_token="t")
+        govde = alca_pi_agent.build_payload(config, sequence=1, delta=1.0, total=1.0, measured_at="2026-10-31T00:00:00+00:00")
+        self.assertEqual(govde["measured_by_version"], AGENT_VERSION)
+        self.assertEqual(
+            set(govde),
+            {"token", "event_type", "quantity_delta", "counter_value", "counter", "gpio", "timestamp",
+             "measured_by_version", "host", "note", "idempotency_key"},
+        )
+        self.assertEqual(config.endpoint, "https://x.test/api/production/pi/events/")
 
 
 if __name__ == "__main__":

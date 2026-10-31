@@ -1,5 +1,5 @@
 [Unit]
-Description=UDAR CRM Raspberry Pi GPIO Machine Agent
+Description=AL-CA ERP Raspberry Pi GPIO Machine Agent
 # Saat: time-set.target, saatin kayitli son degerden kabaca kuruldugu andir
 # (internet beklemez). time-sync.target'a BILEREK baglanmadi: o ancak
 # systemd-time-wait-sync acikken bir sey bekler ve internet gelene kadar
@@ -11,12 +11,12 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-EnvironmentFile=/etc/udar-pi-agent.env
-ExecStart=/usr/bin/python3 /opt/udar-pi-agent/udar_pi_agent.py
+EnvironmentFile=/etc/alca-pi-agent.env
+ExecStart=/usr/bin/python3 /opt/alca-pi-agent/alca_pi_agent.py
 Restart=always
 RestartSec=3
 User=root
-WorkingDirectory=/opt/udar-pi-agent
+WorkingDirectory=/opt/alca-pi-agent
 
 [Install]
 WantedBy=multi-user.target

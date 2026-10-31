@@ -1,6 +1,6 @@
-# UDAR CRM Raspberry Pi Makine Ajanı
+# AL-CA ERP Raspberry Pi Makine Ajanı
 
-> **Sahaya kurulum GitHub'daki `Enes3078/udar-pi-agent` reposundan yapılır**
+> **Sahaya kurulum GitHub'daki `Enes3078/alca-pi-agent` reposundan yapılır**
 > (`bootstrap.sh` / `update.sh`). Bu dizindeki kod, test ve kurulum betikleri
 > o repoyla **birebir aynı** tutulur; değişiklik önce burada yapılıp testleri
 > geçince oraya gönderilir. Aşağısı CRM tarafının anlamını anlatır; kurulum
@@ -9,10 +9,10 @@
 > 2026-09 dersi: bu iki kopya bir kez ayrıştı ve 6 Ağustos'taki gönderim
 > düzeltmesi GitHub'a hiç gitmedi — `update.sh` çalıştıran Pi eski sürüme
 > dönüyordu. Eşitlik denetimi:
-> `diff <(git show HEAD:deploy/raspberry-pi/udar_pi_agent.py) <(curl -s https://raw.githubusercontent.com/Enes3078/udar-pi-agent/main/udar_pi_agent.py)`
+> `diff <(git show HEAD:deploy/raspberry-pi/alca_pi_agent.py) <(curl -s https://raw.githubusercontent.com/Enes3078/alca-pi-agent/main/alca_pi_agent.py)`
 
 
-Bu ajan, makineden Raspberry Pi'a gelen 3.3V sinyali okuyup UDAR CRM üretim API'sine gönderir. İki çalışma tipi vardır:
+Bu ajan, makineden Raspberry Pi'a gelen 3.3V sinyali okuyup AL-CA ERP üretim API'sine gönderir. İki çalışma tipi vardır:
 
 - `pulse`: GPIO17'deki her tam sinyal çevrimini (boş → 3.3V → boş) 1 işlem olarak sayar.
 - `duration`: GPIO17 yüksek kaldığı süreyi ölçer ve süreyi üretim verisi olarak gönderir.
@@ -26,7 +26,7 @@ Bağlamadan önce aşağıdaki **Kablolama kontrol listesi**ni okuyun. Varsayıl
 - Raspberry Pi fiziksel pin 11: sinyal girişi, BCM/GPIO17.
 - Raspberry Pi fiziksel pin 9: GND / Terra.
 - Makineden gelen sinyal GPIO'ya 3.3V logic olarak gelmelidir.
-- Kurulum sihirbazının önerdiği bağlantı: fiziksel pin 13, BCM/GPIO27. Bu durumda `UDAR_GPIO_BCM=27` yazılır.
+- Kurulum sihirbazının önerdiği bağlantı: fiziksel pin 13, BCM/GPIO27. Bu durumda `ALCA_GPIO_BCM=27` yazılır.
 
 ```text
 Makine 3.3V pulse/sinyal çıkışı -> Raspberry Pi fiziksel pin 11 (GPIO17)
@@ -61,12 +61,12 @@ baştan sona kontrol edilir. Sahte vuruşların çoğu yazılımdan değil kablo
 3. **Gerilimsiz röle kontağı kullanılıyorsa** (Pi'nin kendi iç direnci çok zayıftır,
    tek başına yetmez):
    - Kontak 3,3 V pini ile giriş pini arasındaysa: giriş ile GND arasına 10 kΩ direnç
-     ve 100 nF kondansatör takılır. Ayar: `UDAR_PULL_UP=false`, `UDAR_PULSE_EDGE=rising`.
+     ve 100 nF kondansatör takılır. Ayar: `ALCA_PULL_UP=false`, `ALCA_PULSE_EDGE=rising`.
    - Kontak giriş pini ile GND arasındaysa: giriş ile 3,3 V arasına 4,7–10 kΩ direnç
-     takılır. Ayar: `UDAR_PULL_UP=true`, `UDAR_PULSE_EDGE=falling`.
+     takılır. Ayar: `ALCA_PULL_UP=true`, `ALCA_PULSE_EDGE=falling`.
 4. **Makine kapalıyken giriş boşta kalmamalı.** Deneme: servis durdurulur
-   (`sudo systemctl stop udar-pi-agent`), makine kapatılır,
-   `sudo python3 /opt/udar-pi-agent/diagnose_gpio.py --is-sayisi 0` 10 dakika
+   (`sudo systemctl stop alca-pi-agent`), makine kapatılır,
+   `sudo python3 /opt/alca-pi-agent/diagnose_gpio.py --is-sayisi 0` 10 dakika
    çalıştırılır. Ekranda tek bir `SAYILDI` satırı bile görünmemeli. Görünüyorsa giriş
    boşta kalıyor (yüzüyor) ya da parazit alıyor: 3. ve 5. maddelere dönülür. Bu deneme
    gerçek iş ölçümüyle aynı koşuda yapılmaz ("Ayarı ölçerek bulmak").
@@ -78,12 +78,12 @@ baştan sona kontrol edilir. Sahte vuruşların çoğu yazılımdan değil kablo
 8. **Pi'nin saati doğru olmalı.** `timedatectl` komutu
    `System clock synchronized: yes` göstermeli. Pi'de pilli saat yoktur, saati
    internetten alır (ayrıntı: "Saat" bölümü).
-9. **Tek ajan çalışmalı.** `pgrep -af udar_pi_agent` tek satır vermeli; eski
+9. **Tek ajan çalışmalı.** `pgrep -af alca_pi_agent` tek satır vermeli; eski
    kurulumdan kalma ikinci bir servis ya da elle başlatılmış kopya olmamalı. Yeni
    sürüm ikinci kopyayı zaten başlatmaz; `update.sh` de fazla kopya görürse uyarır.
 10. **Ajan sürümü güncel olmalı.** `bash update.sh` çalıştırılır ve bu dosyanın
     başındaki eşitlik denetimi yapılır. `update.sh` kurulu sürümü yazar; sürüm ajanın
-    açılış satırında (`journalctl -u udar-pi-agent`) ve CRM'e giden her kayıtta
+    açılış satırında (`journalctl -u alca-pi-agent`) ve CRM'e giden her kayıtta
     (ölçen: `measured_by_version`, gönderen: `agent_version`) da görünür.
 
 ## CRM Tarafı
@@ -91,7 +91,7 @@ baştan sona kontrol edilir. Sahte vuruşların çoğu yazılımdan değil kablo
 1. `İmalat Yönetimi > Cihaz & Veri` ekranında ilgili istasyona bir cihaz oluştur.
 2. Cihaz tokenını kopyala.
 3. Tablet ekranında seçili olan iş emri CRM tarafından istasyonun aktif RPi hedefi olarak kaydedilir. Aynı istasyonda çok sayıda açık iş emri olsa bile Pi sayımı tablette seçili işe yazılır.
-4. `UDAR_LINE_ID` yalnız cihazın kalıcı olarak tek bir iş emri satırına sabitlenmesi gereken özel kurulumlarda kullanılır. Normal tablet kullanımında boş bırakılır.
+4. `ALCA_LINE_ID` yalnız cihazın kalıcı olarak tek bir iş emri satırına sabitlenmesi gereken özel kurulumlarda kullanılır. Normal tablet kullanımında boş bırakılır.
 
 Önerilen cihaz eşlemeleri:
 
@@ -112,63 +112,106 @@ Raspberry Pi OS üzerinde:
 sudo apt update
 sudo apt install -y python3-gpiozero python3-requests python3-rpi.gpio sqlite3
 
-sudo mkdir -p /opt/udar-pi-agent /var/lib/udar-pi-agent
-sudo cp udar_pi_agent.py /opt/udar-pi-agent/udar_pi_agent.py
-sudo cp diagnose_gpio.py /opt/udar-pi-agent/diagnose_gpio.py
-sudo cp udar-pi-agent.service /etc/systemd/system/udar-pi-agent.service
-sudo cp udar-pi-agent.env.example /etc/udar-pi-agent.env
-sudo nano /etc/udar-pi-agent.env
+sudo mkdir -p /opt/alca-pi-agent /var/lib/alca-pi-agent
+sudo cp alca_pi_agent.py /opt/alca-pi-agent/alca_pi_agent.py
+sudo cp diagnose_gpio.py /opt/alca-pi-agent/diagnose_gpio.py
+sudo cp alca-pi-agent.service /etc/systemd/system/alca-pi-agent.service
+sudo cp alca-pi-agent.env.example /etc/alca-pi-agent.env
+sudo nano /etc/alca-pi-agent.env
 ```
 
-`/etc/udar-pi-agent.env` içinde en az şu alanları doldur:
+`/etc/alca-pi-agent.env` içinde en az şu alanları doldur:
 
 ```env
-UDAR_CRM_URL=https://crm.udarsoft.com
-UDAR_DEVICE_TOKEN=CRMDEKI_CIHAZ_TOKENI
-UDAR_GPIO_BCM=27
+ALCA_CRM_URL=https://crm.firmaniz.com
+ALCA_DEVICE_TOKEN=CRMDEKI_CIHAZ_TOKENI
+ALCA_GPIO_BCM=27
 ```
 
 Servisi başlat:
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now udar-pi-agent
-sudo systemctl status udar-pi-agent
-journalctl -u udar-pi-agent -f
+sudo systemctl enable --now alca-pi-agent
+sudo systemctl status alca-pi-agent
+journalctl -u alca-pi-agent -f
 ```
+
+## Sahadaki Pi nasıl geçer
+
+Ürünün eski adıyla (`udar-pi-agent`) kurulu Pi'de yapılacak tek şey her zamanki
+güncellemedir:
+
+```bash
+cd ~/udar-pi-agent && bash update.sh
+```
+
+Güncelleme, `install.sh` içindeki tek seferlik geçişi çalıştırır. Bir kez geçen Pi'de
+bir daha çalışmaz; yarım kalırsa aynı komutla kaldığı yerden sürer. Güncellenmemiş
+Pi'de hiçbir şey değişmez, eski ajan saymaya devam eder: CRM iki ajanı birlikte kabul
+eder (gövdedeki alanlar aynıdır).
+
+| Ne | Ne olur |
+| --- | --- |
+| Eski servis | Durdurulur ve devre dışı kalır. Durmazsa geçiş yapılmaz, hiçbir dosya taşınmaz (iki ajan aynı makineyi iki kez sayar). |
+| Ayarlar | `/etc/udar-pi-agent.env` → `/etc/alca-pi-agent.env` (izin 600). Yalnız `UDAR_` öneki `ALCA_` olur; token dahil değerler aynen kalır. Yeni dosya zaten varsa üzerine yazılmaz. |
+| Kuyruk | `/var/lib/udar-pi-agent` bütün olarak `/var/lib/alca-pi-agent` olur; gönderilmemiş kayıtlar yeni ajanla gider. `ALCA_QUEUE_DB` eski klasörü gösteriyorsa yeni klasöre çevrilir, başka yola dokunulmaz. Kuyruk eski uygulama klasöründeyse (`/opt/udar-pi-agent`) o klasör silinmez, uyarılır. |
+| Yeni servis | Başlatılır, ayakta kaldığı doğrulanır. Kalmazsa nedeni görme ve düzeltme komutları yazılır; kuyruk ve ayarlar durur. Sonra `bash update.sh` işi tamamlar. |
+| Eski ad | Eski `update.sh`'nin son adımları (`systemctl restart/status`) çalışsın diye yalnız bu Pi'de takma ad (symlink) kalır; bir sonraki `update.sh` onu kaldırır. |
+| Klasör | `~/udar-pi-agent` → `~/alca-pi-agent`, `origin` yeni adres. Bundan sonra `cd ~/alca-pi-agent && bash update.sh`. Hedef klasör varsa taşınmaz, uyarılır; güncelleme yine de başarılıdır. |
+
+Kuyruk klasörünün hedefi doluysa (`/var/lib/alca-pi-agent` içinde dosya varsa) iki
+kuyruk birleştirilmez: eski klasör yerinde kalır, `ALCA_QUEUE_DB` onu gösterir ve her
+güncellemede uyarı çıkar. Kayıt kaybolmaz. Hedef boşaltılırsa sonraki güncelleme taşır.
+
+Eski env dosyası token içerdiği için `/etc/alca-pi-agent.env.gecis-yedegi` adıyla 600
+izinle durur; geçiş sorunsuzsa silinebilir. Yeni ajan elle kopyalansa da eski ayarla
+çalışır: her ayarı önce `ALCA_X`, yoksa ya da boşsa `UDAR_X` anahtarından okur; kuyruk
+yolu verilmemişse yeni dosya yokken eski kuyruğu kullanır.
+
+Geçişin gerçek eski `update.sh` ile sınaması: `python3 test_pi_gecis.py` (sahte
+`sudo`/`systemctl` ve geçici kökle çalışır; ana depo geçmişi yoksa atlanır).
+
+Eski Pi'ler kodu eski depo adresinden çeker; bu yüzden GitHub'daki depo **yeniden
+adlandırılır, yeni depo açılmaz**. GitHub eski adresi yeni adrese yönlendirir.
+
+**Yayın sırası:** depo, yeni kod gönderilmeden ÖNCE yeniden adlandırılır (`bootstrap.sh`
+yeni adresten klonlar, yeniden adlandırma yapılmadan yeni Pi kurulamaz). Yapılmadıysa
+geçen Pi kırılmaz: yeni adrese erişemezse `origin` değişmez, uyarı yazılır; sonraki
+güncelleme eski adresten sürer. Sunucuda `deploy/ad_gecisi.sh denetle` de bunu raporlar.
 
 ## Pulse Modu
 
 Her tam sinyal çevrimine 1 işlem yazılacak makinelerde. Öndeğerler:
 
 ```env
-UDAR_MEASUREMENT_MODE=pulse
-UDAR_PULSE_EDGE=rising
-UDAR_PULSE_MIN_ACTIVE_SECONDS=0.02
-UDAR_PULSE_REARM_SECONDS=0.20
-UDAR_PULSE_MAX_ACTIVE_SECONDS=10.0
-UDAR_PULSE_MIN_INTERVAL_SECONDS=0.20
-UDAR_DAILY_RESET=true
+ALCA_MEASUREMENT_MODE=pulse
+ALCA_PULSE_EDGE=rising
+ALCA_PULSE_MIN_ACTIVE_SECONDS=0.02
+ALCA_PULSE_REARM_SECONDS=0.20
+ALCA_PULSE_MAX_ACTIVE_SECONDS=10.0
+ALCA_PULSE_MIN_INTERVAL_SECONDS=0.20
+ALCA_DAILY_RESET=true
 ```
 
 Ajan kabul ettiği her çevrimde `quantity_delta=1` gönderir; `counter_value` o günün
 toplam sayısıdır. Bir vuruş ancak şu sırayla sayılır:
 
-1. pin en az `UDAR_PULSE_REARM_SECONDS` boyunca kararlı biçimde boş kalır,
-2. en az `UDAR_PULSE_MIN_ACTIVE_SECONDS` boyunca kararlı biçimde aktif olur,
-3. yine en az `UDAR_PULSE_REARM_SECONDS` boyunca boş kalır.
+1. pin en az `ALCA_PULSE_REARM_SECONDS` boyunca kararlı biçimde boş kalır,
+2. en az `ALCA_PULSE_MIN_ACTIVE_SECONDS` boyunca kararlı biçimde aktif olur,
+3. yine en az `ALCA_PULSE_REARM_SECONDS` boyunca boş kalır.
 
-Aktiflik `UDAR_PULSE_MAX_ACTIVE_SECONDS`'tan uzun sürerse (takılı sinyal) sayılmaz.
-Önceki vuruştan `UDAR_PULSE_MIN_INTERVAL_SECONDS`'tan daha kısa süre sonra biten
+Aktiflik `ALCA_PULSE_MAX_ACTIVE_SECONDS`'tan uzun sürerse (takılı sinyal) sayılmaz.
+Önceki vuruştan `ALCA_PULSE_MIN_INTERVAL_SECONDS`'tan daha kısa süre sonra biten
 çevrim de sayılmaz. Açılışta aktif kalan pin ve kısa elektrik gürültüsü sayılmaz.
 Öndeğerlerle kabul edilen en kısa çevrim yaklaşık 0,22 saniyedir; bu yüzden
-öndeğerdeki `UDAR_PULSE_MIN_INTERVAL_SECONDS=0.20` fiilen ek bir koruma getirmez.
+öndeğerdeki `ALCA_PULSE_MIN_INTERVAL_SECONDS=0.20` fiilen ek bir koruma getirmez.
 Asıl koruma, ayarların makineye göre **ölçülerek** seçilmesidir (aşağıda).
 
 Öndeğerler bilerek tarafsızdır ve değiştirilmez: değişirlerse sahadaki her kurulumun
 sayımı değişir.
 
-`UDAR_PULSE_EDGE`:
+`ALCA_PULSE_EDGE`:
 
 - `rising`: boşta pin 0, vuruşta 1 (en yaygın).
 - `falling`: boşta pin 1, vuruşta 0.
@@ -179,12 +222,12 @@ sayımı değişir.
   davranış korundu, belge düzeltildi. Sihirbaz artık `both` önermiyor; ajan eski ayarı
   kabul eder ve açılışta hatırlatır.
 
-`UDAR_BOUNCE_SECONDS` artık okunmuyor. Temmuz 2026'dan (`391b844`) beri kullanılmıyor;
+`ALCA_BOUNCE_SECONDS` artık okunmuyor. Temmuz 2026'dan (`391b844`) beri kullanılmıyor;
 daha eski ajanda gpiozero `Button`'ın `bounce_time` değeriydi. `391b844` sayımı
 yukarıdaki çevrim süzgecine taşıdı; o günden beri değer yalnız okunuyordu, pine
 verilmiyordu, ama bozuk bir değer ajanı açılışta çökertebiliyordu. Eski ayar
 dosyasında kalmışsa zararı yok, silinebilir; ajan açılışta hatırlatır. Süzgeç
-yukarıdaki `UDAR_PULSE_*` ayarlarıdır. Sahada Temmuz 2026 öncesi bir ajan hâlâ
+yukarıdaki `ALCA_PULSE_*` ayarlarıdır. Sahada Temmuz 2026 öncesi bir ajan hâlâ
 çalışıyorsa bu değer onun için geçerlidir; o ajanın vuruş kayıtlarında
 (`counter.mode` = `pulse`) `pulse` alanı yoktur. Süre kayıtlarında `pulse` alanı hiçbir
 sürümde yoktur; orada bu alanın yokluğu eski ajan demek değildir ("Kaydı hangi ajan
@@ -197,15 +240,15 @@ türüne göre değil, o makinenin gerçekte ürettiği sinyal ölçülerek seç
 `diagnose_gpio.py` ajanın süzgecini aynen kullanır (tek kaynak) ve CRM'e hiçbir şey
 göndermez.
 
-1. Servisi durdurun: `sudo systemctl stop udar-pi-agent`
+1. Servisi durdurun: `sudo systemctl stop alca-pi-agent`
 2. **Makine kapalı denemesi (ayrı koşu).** Makine kapalıyken
-   `sudo python3 /opt/udar-pi-agent/diagnose_gpio.py --is-sayisi 0` çalıştırıp birkaç
+   `sudo python3 /opt/alca-pi-agent/diagnose_gpio.py --is-sayisi 0` çalıştırıp birkaç
    dakika (kontrol listesi 4. madde: 10 dakika) bekleyin, Ctrl+C ile çıkın. Ekrana hiç
    `SAYILDI` satırı düşmemeli; özet "Ajan MEVCUT ayarla DOGRU sayiyor (0)" demeli ve
    ölçülen çevrim 0 olmalı. Değilse sorun ayarda değil kablodadır (kontrol listesi
    3-6. maddeler): ayar önerisine geçmeyin. Bu denemede ayar önerilmez.
 3. **Gerçek iş ölçümü (yeni koşu).** Ölçümü yeniden başlatın:
-   `sudo python3 /opt/udar-pi-agent/diagnose_gpio.py`
+   `sudo python3 /opt/alca-pi-agent/diagnose_gpio.py`
    (`sudo`, ayar dosyasını okuyabilsin diye; pin, pull-up, kenar ve süzgeç ayarları
    oradan alınır. Denemek için `--pin`, `--pull-up`/`--no-pull-up`, `--edge`,
    `--min-active`, `--rearm`, `--max-active`, `--min-interval` verilebilir.)
@@ -225,13 +268,13 @@ göndermez.
    **önerilen ayarlar**.
 6. Öneriler yalnız özet "AYNEN yapistirilabilir" diyorsa girilir; bunu yalnız gerçek iş
    sayısı girilmiş bir ölçümde der. Giriş: `bash install.sh --configure` ile (ya da
-   `sudo nano /etc/udar-pi-agent.env`).
+   `sudo nano /etc/alca-pi-agent.env`).
    Sihirbaz "en kısa gerçek çevrim" sorusunda özetteki değeri ister ve iki vuruş arası
    süreyi buna göre önerir. Özet "DOGRUDAN GIRMEYIN" diyorsa satırlar `#` ile kapalı
    gelir ve nedeni yazar (aşağıda).
 7. Yeni ayarla ölçümü tekrarlayın: "Ajan MEVCUT ayarla sayardı" sayısı gerçekte
    yapılan iş sayısına eşit olmalı. Sonra servisi başlatın:
-   `sudo systemctl start udar-pi-agent`.
+   `sudo systemctl start alca-pi-agent`.
 
 Öneri tek bir ölçüme değil sağlam istatistiğe dayanır:
 
@@ -268,14 +311,14 @@ göstermez: örneğin 0,5 sn aktif, 0,1 sn boş, 0,5 sn aktif gelen iki gerçek 
 kopmadan ayırt edilemez; o zaman ajan da ölçüm de öneri de yarı sayar. Bunu yalnız
 gerçek iş sayısı ayırır.
 
-Öneri kuralları (`UDAR_PULSE_MIN_INTERVAL_SECONDS` kuralı `install.sh` ile aynıdır):
+Öneri kuralları (`ALCA_PULSE_MIN_INTERVAL_SECONDS` kuralı `install.sh` ile aynıdır):
 
 | Ayar | Kural |
 | --- | --- |
-| `UDAR_PULSE_MIN_ACTIVE_SECONDS` | kesintisiz aktif sürenin alt %10'unun yarısı (ajan aktifliğin kesintisiz bu kadar sürmesini ister; kopmalı çevrimde en uzun kesintisiz parçaya bakılır). En uzun parazitten kısa kalırsa önerilmez |
-| `UDAR_PULSE_REARM_SECONDS` | bekleme süresinin alt %10'unun yarısı, en çok 0,50. En uzun kopmadan kısa kalırsa önerilmez |
-| `UDAR_PULSE_MAX_ACTIVE_SECONDS` | en uzun aktif sürenin 2 katı, en az 10 |
-| `UDAR_PULSE_MIN_INTERVAL_SECONDS` | iki çevrim arasının alt %10'unun yarısı; 0,20'nin altına inilmez, yalnız çevrim 0,25 sn'den kısaysa yarısı |
+| `ALCA_PULSE_MIN_ACTIVE_SECONDS` | kesintisiz aktif sürenin alt %10'unun yarısı (ajan aktifliğin kesintisiz bu kadar sürmesini ister; kopmalı çevrimde en uzun kesintisiz parçaya bakılır). En uzun parazitten kısa kalırsa önerilmez |
+| `ALCA_PULSE_REARM_SECONDS` | bekleme süresinin alt %10'unun yarısı, en çok 0,50. En uzun kopmadan kısa kalırsa önerilmez |
+| `ALCA_PULSE_MAX_ACTIVE_SECONDS` | en uzun aktif sürenin 2 katı, en az 10 |
+| `ALCA_PULSE_MIN_INTERVAL_SECONDS` | iki çevrim arasının alt %10'unun yarısı; 0,20'nin altına inilmez, yalnız çevrim 0,25 sn'den kısaysa yarısı |
 
 Makinenin en kısa çevrimi 0,25 saniyeden kısaysa tek tek vuruş saymak hataya açıktır;
 mümkünse makinenin kendi sayacı kullanılır.
@@ -283,9 +326,9 @@ mümkünse makinenin kendi sayacı kullanılır.
 Güncelleme öncesinde kuyruğa birikmiş sahte kayıtları yalnız gerektiğinde temizle:
 
 ```bash
-sudo systemctl stop udar-pi-agent
-sudo sqlite3 /var/lib/udar-pi-agent/machine_events.sqlite3 "DELETE FROM events;"
-sudo systemctl start udar-pi-agent
+sudo systemctl stop alca-pi-agent
+sudo sqlite3 /var/lib/alca-pi-agent/machine_events.sqlite3 "DELETE FROM events;"
+sudo systemctl start alca-pi-agent
 ```
 
 ## Süre Modu
@@ -293,19 +336,19 @@ sudo systemctl start udar-pi-agent
 Voltaj aktif kaldığı süre iş olarak sayılacak makinelerde:
 
 ```env
-UDAR_MEASUREMENT_MODE=duration
-UDAR_DURATION_UNIT=seconds
-UDAR_MIN_DURATION_SECONDS=1.0
-UDAR_DURATION_ACTIVE_LEVEL=high
-UDAR_DURATION_START_STABLE_SECONDS=0.20
-UDAR_DURATION_STOP_STABLE_SECONDS=0.20
-UDAR_DURATION_DROPOUT_GRACE_SECONDS=1.50
-UDAR_DURATION_DROPOUT_LOG_INTERVAL_SECONDS=30
-UDAR_DAILY_RESET=true
+ALCA_MEASUREMENT_MODE=duration
+ALCA_DURATION_UNIT=seconds
+ALCA_MIN_DURATION_SECONDS=1.0
+ALCA_DURATION_ACTIVE_LEVEL=high
+ALCA_DURATION_START_STABLE_SECONDS=0.20
+ALCA_DURATION_STOP_STABLE_SECONDS=0.20
+ALCA_DURATION_DROPOUT_GRACE_SECONDS=1.50
+ALCA_DURATION_DROPOUT_LOG_INTERVAL_SECONDS=30
+ALCA_DAILY_RESET=true
 ```
 
 GPIO yüksek olunca süre başlar. GPIO kısa süre 0'a düşüp
-`UDAR_DURATION_DROPOUT_GRACE_SECONDS` dolmadan tekrar 1 olursa bu kopma
+`ALCA_DURATION_DROPOUT_GRACE_SECONDS` dolmadan tekrar 1 olursa bu kopma
 parazit kabul edilir ve çalışma bölünmez. Sinyal bu süre boyunca kesintisiz 0
 kalırsa gerçek duruş kabul edilip tek kayıt olarak toplam süre gönderilir.
 `quantity_delta` o çalışma periyodunun süresi, `counter_value` o günün toplam
@@ -332,18 +375,18 @@ eşitlenene kadar geride kalır. O arada ölçülen vuruşun zamanı yanlış ol
   `queue_age_seconds` (ölçümden gönderime geçen süre, saatin sıçramasından
   etkilenmeyen iç sayaçla). CRM ölçüm zamanını bunlarla düzeltebilir.
 - Kontrol: `timedatectl` → `System clock synchronized: yes`. Eşitlenmemişse ajanın
-  günlüğünde (`journalctl -u udar-pi-agent`) bir kez uyarı görünür.
+  günlüğünde (`journalctl -u alca-pi-agent`) bir kez uyarı görünür.
 
 ## Tek ajan kuralı
 
 Aynı Pi'de iki ajan aynı makineyi okursa her vuruş iki kez sayılır. Ajan açılışta
 kuyruk dosyasının yanındaki kilidi alır
-(`/var/lib/udar-pi-agent/machine_events.sqlite3.lock`). Kilit başkasındaysa ikinci
+(`/var/lib/alca-pi-agent/machine_events.sqlite3.lock`). Kilit başkasındaysa ikinci
 kopya hiçbir şey okumadan, nedenini yazarak çıkar. Ajan durunca ya da çökünce kilit
 kendiliğinden bırakılır; kilit dosyasını silmek gerekmez.
 
 Kilit, bu sürümden önceki (kilitsiz) bir ajanı durduramaz. Eski kurulumdan kalma bir
-kopya elle ya da başka bir servisle çalışıyorsa `pgrep -af udar_pi_agent` birden fazla
+kopya elle ya da başka bir servisle çalışıyorsa `pgrep -af alca_pi_agent` birden fazla
 satır verir; `update.sh` bunu görünce uyarır.
 
 ## Yerel Log ve Kuyruk
@@ -351,21 +394,21 @@ satır verir; `update.sh` bunu görünce uyarır.
 Son gönderimleri görmek:
 
 ```bash
-sqlite3 /var/lib/udar-pi-agent/machine_events.sqlite3 \
+sqlite3 /var/lib/alca-pi-agent/machine_events.sqlite3 \
   "select id,status,response_code,created_at,sent_at from event_log order by id desc limit 20;"
 ```
 
 Gönderilemeyen kuyruk:
 
 ```bash
-sqlite3 /var/lib/udar-pi-agent/machine_events.sqlite3 \
+sqlite3 /var/lib/alca-pi-agent/machine_events.sqlite3 \
   "select id,idempotency_key,attempts,last_error,created_at from events order by id;"
 ```
 
 Ajan, gönderim hatalarında aynı kaydı sürekli göndermek yerine geri çekilerek
-yeniden dener. Ağ hataları `UDAR_SEND_RETRY_BASE_SECONDS` ile başlar; 400/403
-gibi CRM doğrulama hataları `UDAR_SEND_RETRY_VALIDATION_SECONDS` ile başlar;
-tüm beklemeler `UDAR_SEND_RETRY_MAX_SECONDS` ile sınırlanır. Böylece aktif iş
+yeniden dener. Ağ hataları `ALCA_SEND_RETRY_BASE_SECONDS` ile başlar; 400/403
+gibi CRM doğrulama hataları `ALCA_SEND_RETRY_VALIDATION_SECONDS` ile başlar;
+tüm beklemeler `ALCA_SEND_RETRY_MAX_SECONDS` ile sınırlanır. Böylece aktif iş
 henüz seçilmemişken veya CRM geçici olarak meşgulken sunucuya gereksiz istek
 yükü binmez.
 
@@ -408,7 +451,7 @@ CRM (cihaz ekranındaki "eski Pi yazılımı" uyarısı, sahte vuruş teşhisi) 
    ölçüp gönderdi. Daha eski dönemi ayırmak için ÖNCE `counter.mode`'a bakılır (her
    sürüm yazar):
    - `pulse`: `pulse` alanı yoksa Temmuz 2026 (`391b844`) öncesi `when_pressed`
-     ajanıdır; onda `UDAR_BOUNCE_SECONDS` gpiozero `Button`'ın `bounce_time` değeriydi.
+     ajanıdır; onda `ALCA_BOUNCE_SECONDS` gpiozero `Button`'ın `bounce_time` değeriydi.
      `pulse` alanı varsa çevrim süzgeçli ajandır (`391b844` ve sonrası).
    - `duration`: `pulse` alanı hiçbir sürümde yazılmaz; yokluğu burada eski ajan demek
      DEĞİLDİR. `duration.validated_cycle` varsa 24 Temmuz 2026 (`4a90800`) ve sonrası
@@ -421,7 +464,7 @@ CRM (cihaz ekranındaki "eski Pi yazılımı" uyarısı, sahte vuruş teşhisi) 
 Pulse örneği:
 
 ```bash
-curl -X POST "https://crm.udarsoft.com/api/production/pi/events/" \
+curl -X POST "https://crm.firmaniz.com/api/production/pi/events/" \
   -H "Content-Type: application/json" \
   -d '{
     "token": "CRMDEKI_CIHAZ_TOKENI",
@@ -438,7 +481,7 @@ curl -X POST "https://crm.udarsoft.com/api/production/pi/events/" \
 Süre örneği:
 
 ```bash
-curl -X POST "https://crm.udarsoft.com/api/production/pi/events/" \
+curl -X POST "https://crm.firmaniz.com/api/production/pi/events/" \
   -H "Content-Type: application/json" \
   -d '{
     "token": "CRMDEKI_CIHAZ_TOKENI",
@@ -461,4 +504,4 @@ Tablet kullanılmayan özel bir kurulumda hedef iş payload ile sabitlenecekse `
 
 ## Cloudflared Gerekir mi?
 
-Pi, `https://crm.udarsoft.com` veya kullanılacak CRM alan adına doğrudan çıkabiliyorsa Cloudflared gerekmez. CRM yalnız iç ağda kalacaksa veya Pi doğrudan erişemeyecekse Cloudflared/Tailscale/WireGuard gibi bir tünel kurulabilir. Bu ajan için en temiz yapı Pi'nin HTTPS üzerinden CRM API'ye outbound istek atmasıdır.
+Pi, `https://crm.firmaniz.com` veya kullanılacak CRM alan adına doğrudan çıkabiliyorsa Cloudflared gerekmez. CRM yalnız iç ağda kalacaksa veya Pi doğrudan erişemeyecekse Cloudflared/Tailscale/WireGuard gibi bir tünel kurulabilir. Bu ajan için en temiz yapı Pi'nin HTTPS üzerinden CRM API'ye outbound istek atmasıdır.

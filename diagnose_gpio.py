@@ -5,7 +5,7 @@
 1. Pindeki her 0/1 değişimini zamanıyla yazar (ham görüntü). Makine
    KAPALIYKEN tek bir ``SAYILDI`` satırı bile çıkmamalı; çıkıyorsa giriş boşta
    (yüzüyor) ya da parazit alıyor (README: Kablolama kontrol listesi).
-2. Aynı sinyali ajanın süzgecinden (udar_pi_agent.PulseCycleDetector, tek
+2. Aynı sinyali ajanın süzgecinden (alca_pi_agent.PulseCycleDetector, tek
    kaynak) geçirir: ajan bu ayarlarla kaç vuruş sayardı?
 3. Ctrl+C ile çıkınca ölçüm özetini ve önerilen ayarları yazar. Ayar makine
    türüne göre değil, bu makinenin gerçekte ürettiği sinyale göre seçilir.
@@ -27,9 +27,9 @@ bulmak"):
   söyler (``--is-sayisi`` ya da çıkışta sorulur); araç ajanı kendiliğinden
   hatalı ilan etmez.
 
-Pin, pull-up, kenar ve süzgeç ayarları /etc/udar-pi-agent.env'den okunur (dosya
+Pin, pull-up, kenar ve süzgeç ayarları /etc/alca-pi-agent.env'den okunur (dosya
 yalnız root'a açık: ``sudo`` ile çalıştırın); komut satırı onları ezer. Ajan
-servisi çalışırken pin meşgul olabilir: önce ``sudo systemctl stop udar-pi-agent``.
+servisi çalışırken pin meşgul olabilir: önce ``sudo systemctl stop alca-pi-agent``.
 """
 from __future__ import annotations
 
@@ -49,12 +49,13 @@ except ImportError as exc:
     raise SystemExit("python3-gpiozero gerekli. Kur: sudo apt install python3-gpiozero") from exc
 
 # Süzgeç ve öneri kuralı ajandan gelir (bu dosya ajanın yanında durur:
-# /opt/udar-pi-agent/ ve depo klasörü). Kural iki yerde yazılırsa ayrışır.
-from udar_pi_agent import (
+# /opt/alca-pi-agent/ ve depo klasörü). Kural iki yerde yazılırsa ayrışır.
+from alca_pi_agent import (
     ENV_DOSYASI,
     FAST_CYCLE_SECONDS,
     Config,
     PulseCycleDetector,
+    ayar_degeri,
     min_interval_suggestion,
     pulse_active_level,
 )
@@ -114,17 +115,17 @@ IS_SAYISI_ISTE = (
 
 # Öneri anahtarı -> (ayar sözlüğündeki alan, Config alanı, büyüdükçe süzgeç SIKILAŞIR mı)
 AYAR_ALANI = {
-    "UDAR_PULSE_MIN_ACTIVE_SECONDS": ("min_active", "pulse_min_active_seconds", True),
-    "UDAR_PULSE_REARM_SECONDS": ("rearm", "pulse_rearm_seconds", True),
-    "UDAR_PULSE_MAX_ACTIVE_SECONDS": ("max_active", "pulse_max_active_seconds", False),
-    "UDAR_PULSE_MIN_INTERVAL_SECONDS": ("min_interval", "pulse_min_interval_seconds", True),
+    "ALCA_PULSE_MIN_ACTIVE_SECONDS": ("min_active", "pulse_min_active_seconds", True),
+    "ALCA_PULSE_REARM_SECONDS": ("rearm", "pulse_rearm_seconds", True),
+    "ALCA_PULSE_MAX_ACTIVE_SECONDS": ("max_active", "pulse_max_active_seconds", False),
+    "ALCA_PULSE_MIN_INTERVAL_SECONDS": ("min_interval", "pulse_min_interval_seconds", True),
 }
 
 ONERI_ACIKLAMASI = {
-    "UDAR_PULSE_MIN_ACTIVE_SECONDS": "kesintisiz aktif surenin alt %10'unun yarisi",
-    "UDAR_PULSE_REARM_SECONDS": "bekleme suresinin alt %10'unun yarisi (en cok 0.5)",
-    "UDAR_PULSE_MAX_ACTIVE_SECONDS": "en uzun aktif surenin 2 kati (en az 10)",
-    "UDAR_PULSE_MIN_INTERVAL_SECONDS": "iki cevrim arasinin alt %10'unun yarisi, en az 0.20 (cok hizli makinede yarisi)",
+    "ALCA_PULSE_MIN_ACTIVE_SECONDS": "kesintisiz aktif surenin alt %10'unun yarisi",
+    "ALCA_PULSE_REARM_SECONDS": "bekleme suresinin alt %10'unun yarisi (en cok 0.5)",
+    "ALCA_PULSE_MAX_ACTIVE_SECONDS": "en uzun aktif surenin 2 kati (en az 10)",
+    "ALCA_PULSE_MIN_INTERVAL_SECONDS": "iki cevrim arasinin alt %10'unun yarisi, en az 0.20 (cok hizli makinede yarisi)",
 }
 
 
@@ -148,13 +149,14 @@ def ayar_dosyasini_oku(yol: Path) -> dict[str, str] | None:
 
 
 def _dosyadan_sayi(dosya: dict[str, str], anahtar: str, ondeger: float) -> float:
-    deger = dosya.get(anahtar, "").strip()
+    # Eski önekli (henüz geçirilmemiş) ayar dosyası da okunur: ayar_degeri.
+    okunan, deger = ayar_degeri(dosya, anahtar)
     if not deger:
         return ondeger
     try:
         return float(deger)
     except ValueError:
-        print(f"Uyari: {anahtar}={deger!r} sayi degil; {ondeger} kullaniliyor.")
+        print(f"Uyari: {okunan}={deger!r} sayi degil; {ondeger} kullaniliyor.")
         return ondeger
 
 
@@ -168,19 +170,19 @@ def ayarlari_belirle(args: argparse.Namespace, dosya: dict[str, str] | None) -> 
     if args.pull_up is not None:
         pull_up = bool(args.pull_up)
     else:
-        pull_up = d.get("UDAR_PULL_UP", "").strip().lower() in {"1", "true", "yes", "on"}
-    edge = args.edge or d.get("UDAR_PULSE_EDGE", "").strip().lower() or "rising"
+        pull_up = ayar_degeri(d, "ALCA_PULL_UP")[1].lower() in {"1", "true", "yes", "on"}
+    edge = args.edge or ayar_degeri(d, "ALCA_PULSE_EDGE")[1].lower() or "rising"
     if edge not in {"rising", "falling", "both"}:
-        print(f"Uyari: UDAR_PULSE_EDGE={edge!r} gecersiz; rising kullaniliyor.")
+        print(f"Uyari: ALCA_PULSE_EDGE={edge!r} gecersiz; rising kullaniliyor.")
         edge = "rising"
     return {
-        "pin": int(sayi(args.pin, "UDAR_GPIO_BCM", VARSAYILAN_PIN)),
+        "pin": int(sayi(args.pin, "ALCA_GPIO_BCM", VARSAYILAN_PIN)),
         "pull_up": pull_up,
         "edge": edge,
-        "min_active": sayi(args.min_active, "UDAR_PULSE_MIN_ACTIVE_SECONDS", _ONDEGER["pulse_min_active_seconds"]),
-        "rearm": sayi(args.rearm, "UDAR_PULSE_REARM_SECONDS", _ONDEGER["pulse_rearm_seconds"]),
-        "max_active": sayi(args.max_active, "UDAR_PULSE_MAX_ACTIVE_SECONDS", _ONDEGER["pulse_max_active_seconds"]),
-        "min_interval": sayi(args.min_interval, "UDAR_PULSE_MIN_INTERVAL_SECONDS", _ONDEGER["pulse_min_interval_seconds"]),
+        "min_active": sayi(args.min_active, "ALCA_PULSE_MIN_ACTIVE_SECONDS", _ONDEGER["pulse_min_active_seconds"]),
+        "rearm": sayi(args.rearm, "ALCA_PULSE_REARM_SECONDS", _ONDEGER["pulse_rearm_seconds"]),
+        "max_active": sayi(args.max_active, "ALCA_PULSE_MAX_ACTIVE_SECONDS", _ONDEGER["pulse_max_active_seconds"]),
+        "min_interval": sayi(args.min_interval, "ALCA_PULSE_MIN_INTERVAL_SECONDS", _ONDEGER["pulse_min_interval_seconds"]),
     }
 
 
@@ -416,19 +418,19 @@ def olcum_ozeti(parcalar: list[tuple[float, float]]) -> dict[str, Any]:
         return ozet
 
     oneri: dict[str, float | None] = {
-        "UDAR_PULSE_MIN_ACTIVE_SECONDS": max(0.005, _asagi(ozet["kesintisiz_alt"] / 2, 3)),
-        "UDAR_PULSE_REARM_SECONDS": min(0.50, max(0.01, _asagi(ozet["bekleme"][0] / 2, 2))),
-        "UDAR_PULSE_MAX_ACTIVE_SECONDS": max(10.0, float(math.ceil(max(aktifler) * 2))),
-        "UDAR_PULSE_MIN_INTERVAL_SECONDS": min_interval_suggestion(ozet["aralik"][0]),
+        "ALCA_PULSE_MIN_ACTIVE_SECONDS": max(0.005, _asagi(ozet["kesintisiz_alt"] / 2, 3)),
+        "ALCA_PULSE_REARM_SECONDS": min(0.50, max(0.01, _asagi(ozet["bekleme"][0] / 2, 2))),
+        "ALCA_PULSE_MAX_ACTIVE_SECONDS": max(10.0, float(math.ceil(max(aktifler) * 2))),
+        "ALCA_PULSE_MIN_INTERVAL_SECONDS": min_interval_suggestion(ozet["aralik"][0]),
     }
-    if parazitler and oneri["UDAR_PULSE_MIN_ACTIVE_SECONDS"] <= ozet["parazit"][1]:
-        oneri["UDAR_PULSE_MIN_ACTIVE_SECONDS"] = None
-        ozet["engel"]["UDAR_PULSE_MIN_ACTIVE_SECONDS"] = (
+    if parazitler and oneri["ALCA_PULSE_MIN_ACTIVE_SECONDS"] <= ozet["parazit"][1]:
+        oneri["ALCA_PULSE_MIN_ACTIVE_SECONDS"] = None
+        ozet["engel"]["ALCA_PULSE_MIN_ACTIVE_SECONDS"] = (
             "parazit gercek sinyale cok yakin; ayar degil kablolama sorunu"
         )
-    if kopmalar and oneri["UDAR_PULSE_REARM_SECONDS"] <= ozet["kopma"][1]:
-        oneri["UDAR_PULSE_REARM_SECONDS"] = None
-        ozet["engel"]["UDAR_PULSE_REARM_SECONDS"] = (
+    if kopmalar and oneri["ALCA_PULSE_REARM_SECONDS"] <= ozet["kopma"][1]:
+        oneri["ALCA_PULSE_REARM_SECONDS"] = None
+        ozet["engel"]["ALCA_PULSE_REARM_SECONDS"] = (
             "sinyal kopmasi gercek beklemeye cok yakin; ayar degil kablolama sorunu"
         )
     ozet["oneri"] = oneri
@@ -641,7 +643,7 @@ def ozet_satirlari(
 
     s.append("")
     if yapistir:
-        s.append("ONERILEN AYARLAR (bash install.sh --configure ya da sudo nano /etc/udar-pi-agent.env).")
+        s.append("ONERILEN AYARLAR (bash install.sh --configure ya da sudo nano /etc/alca-pi-agent.env).")
         s.append(f"Gercek is sayisiyla ({is_sayisi}) kontrol edildi: satirlar ayar dosyasina AYNEN")
         s.append("yapistirilabilir. Aciklama ayri '#' satirinda: ayar dosyasinda deger satirinin sonuna")
         s.append("yorum yazilmaz, yazilirsa degerin parcasi sayilir.")
@@ -700,7 +702,7 @@ def _is_sayisi_arg(deger: str) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="UDAR GPIO sinyal teshisi ve olcume dayali ayar onerisi")
+    parser = argparse.ArgumentParser(description="AL-CA ERP GPIO sinyal teshisi ve olcume dayali ayar onerisi")
     parser.add_argument(
         "--pin", type=int, default=None,
         help=f"BCM GPIO pin. Fiziksel pin 13 icin 27. Verilmezse ayar dosyasindan, o da yoksa {VARSAYILAN_PIN}.",
@@ -716,10 +718,10 @@ def main() -> int:
     )
     parser.add_argument("--poll", type=float, default=0.002, help="Okuma araligi saniye.")
     parser.add_argument("--debounce", type=float, default=0.005, help="Ham gorunumde tekrar sayim filtresi saniye.")
-    parser.add_argument("--min-active", type=float, default=None, help="Denenecek UDAR_PULSE_MIN_ACTIVE_SECONDS.")
-    parser.add_argument("--rearm", type=float, default=None, help="Denenecek UDAR_PULSE_REARM_SECONDS.")
-    parser.add_argument("--max-active", type=float, default=None, help="Denenecek UDAR_PULSE_MAX_ACTIVE_SECONDS.")
-    parser.add_argument("--min-interval", type=float, default=None, help="Denenecek UDAR_PULSE_MIN_INTERVAL_SECONDS.")
+    parser.add_argument("--min-active", type=float, default=None, help="Denenecek ALCA_PULSE_MIN_ACTIVE_SECONDS.")
+    parser.add_argument("--rearm", type=float, default=None, help="Denenecek ALCA_PULSE_REARM_SECONDS.")
+    parser.add_argument("--max-active", type=float, default=None, help="Denenecek ALCA_PULSE_MAX_ACTIVE_SECONDS.")
+    parser.add_argument("--min-interval", type=float, default=None, help="Denenecek ALCA_PULSE_MIN_INTERVAL_SECONDS.")
     parser.add_argument(
         "--is-sayisi", type=_is_sayisi_arg, default=None,
         help="Olcum boyunca makinenin gercekte yaptigi is sayisi (siz sayin; makine kapali denemede 0). "
@@ -740,7 +742,7 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001 (gpiozero arka uca gore farkli hata verir)
         raise SystemExit(
             f"GPIO{ayar['pin']} acilamadi: {exc}\n"
-            "Ajan servisi calisiyorsa once durdurun:  sudo systemctl stop udar-pi-agent"
+            "Ajan servisi calisiyorsa once durdurun:  sudo systemctl stop alca-pi-agent"
         ) from None
 
     active_level = pulse_active_level(ayar["edge"])

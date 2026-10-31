@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-UDAR CRM Raspberry Pi GPIO agent.
+AL-CA ERP Raspberry Pi GPIO agent.
 
 Default wiring:
 - Physical pin 11 = GPIO17/BCM17 signal input. The machine/button must provide 3.3V pulses here.
@@ -28,7 +28,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, Mapping, NamedTuple
 
 # Ajan sürümü. Her kayıtta İKİ ayrı alan olarak gider:
 # - measured_by_version: vuruşu ÖLÇEN ajanın sürümü; ölçüm anında kuyruğa yazılır.
@@ -43,7 +43,7 @@ from typing import Any, NamedTuple
 # olmaz. Karar sırası: README "Kaydı hangi ajan ölçtü?". Davranışı
 # değiştiren her değişiklikte artırılır (biçim: YIL.AY.GÜN, aynı gün ikinci
 # sürüm için .2).
-AGENT_VERSION = "2026.09.30"
+AGENT_VERSION = "2026.10.31"
 
 try:
     import requests
@@ -56,45 +56,77 @@ except ImportError as exc:  # pragma: no cover
     raise SystemExit("python3-gpiozero is required. Run: sudo apt install python3-gpiozero") from exc
 
 
+# GERİYE DÖNÜK UYUMLULUK: ürünün eski adı. Sahadaki Pi'ler bu adla kuruldu
+# (env anahtarları, env dosyası, kuyruk klasörü). install.sh onları tek seferde
+# yeni ada taşır; ajan yine de eski ayar ve eski yollarla TEK BAŞINA çalışır:
+# elle kopyalanırsa ya da geçiş yarım kalırsa üretim sayımı durmamalı.
+YENI_ONEK = "ALCA_"
+ESKI_ONEK = "UDAR_"
+KUYRUK_DOSYASI = "/var/lib/alca-pi-agent/machine_events.sqlite3"
+ESKI_KUYRUK_DOSYASI = "/var/lib/udar-pi-agent/machine_events.sqlite3"
+
+
+def ayar_degeri(kaynak: Mapping[str, str], name: str) -> tuple[str, str]:
+    """Ayarı ``kaynak``tan okur: (değerin okunduğu anahtar, değer). TEK YARDIMCI.
+
+    Önce yeni ad (``ALCA_X``), o yoksa ya da boşsa eski ad (``UDAR_X``). İkisi de
+    doluysa yeni ad kazanır. Boş değer anahtar hiç yokmuş gibidir (bkz. ``env``).
+    Ajan ortam değişkenlerini, diagnose_gpio.py ayar dosyasını bununla okur.
+    """
+    value = kaynak.get(name, "").strip()
+    if value or not name.startswith(YENI_ONEK):
+        return name, value
+    eski = ESKI_ONEK + name[len(YENI_ONEK):]
+    eski_value = kaynak.get(eski, "").strip()
+    return (eski, eski_value) if eski_value else (name, "")
+
+
 def env(name: str, default: str = "") -> str:
     """Ortam değişkenini okur; BOŞ değer, anahtar hiç yokmuş gibi öndeğere düşer.
 
     ``os.environ.get(name, default)`` anahtar varsa ama değeri boşsa öndeğeri
-    değil ``""`` döndürür. Env dosyasında ``UDAR_POLL_INTERVAL_SECONDS=`` gibi
+    değil ``""`` döndürür. Env dosyasında ``ALCA_POLL_INTERVAL_SECONDS=`` gibi
     boş bırakılmış bir satır, sayısal alanlarda ``float("")`` ile ajanı AÇILIŞTA
-    çökertiyordu; ``UDAR_QUEUE_DB=`` boş kalınca kuyruk dosyası çalışma dizinine
-    düşüyordu. Boş bırakılmış bir ayar "ayarlanmamış" demektir.
+    çökertiyordu; ``ALCA_QUEUE_DB=`` boş kalınca kuyruk dosyası çalışma dizinine
+    düşüyordu. Boş bırakılmış bir ayar "ayarlanmamış" demektir. Eski önekli
+    anahtar da okunur (bkz. ``ayar_degeri``).
     """
-    value = os.environ.get(name, "").strip()
-    return value if value else default
+    return ayar_degeri(os.environ, name)[1] or default
 
 
-ENV_DOSYASI = "/etc/udar-pi-agent.env"
+def yeni_yoksa_eski(yeni: str, eski: str) -> str:
+    """Yeni yolu verir; yalnız yeni yol yokken eski yol duruyorsa eskisini."""
+    return eski if not os.path.exists(yeni) and os.path.exists(eski) else yeni
+
+
+ENV_DOSYASI = yeni_yoksa_eski("/etc/alca-pi-agent.env", "/etc/udar-pi-agent.env")
 
 
 def _sayi_hatasi(name: str, value: str, beklenen: str) -> SystemExit:
     return SystemExit(
         f"AYAR HATASI: {ENV_DOSYASI} icinde {name} {beklenen} olmali, su an: {value!r}\n"
-        f"Duzeltmek icin Pi'nin terminalinde:  cd ~/udar-pi-agent && bash install.sh --configure\n"
+        f"Duzeltmek icin Pi'nin terminalinde:  cd ~/alca-pi-agent && bash install.sh --configure\n"
         f"ya da elle:  sudo nano {ENV_DOSYASI}"
     )
 
 
 def float_env(name: str, default: str) -> float:
     """Sayi ayari. Bozuk deger TRACEBACK ile degil, ne yapilacagini soyleyen mesajla durur."""
-    value = env(name, default)
+    anahtar, value = ayar_degeri(os.environ, name)
+    value = value or default
     try:
         return float(value)
     except ValueError:
-        raise _sayi_hatasi(name, value, "sayi (ornek: " + default + ")") from None
+        raise _sayi_hatasi(anahtar, value, "sayi (ornek: " + default + ")") from None
 
 
 def int_env(name: str, default: str) -> int:
-    value = env(name, default)
+    anahtar, value = ayar_degeri(os.environ, name)
+    value = value or default
     try:
         return int(value)
     except ValueError:
-        raise _sayi_hatasi(name, value, "tam sayi (ornek: " + default + ")") from None
+        raise _sayi_hatasi(anahtar, value, "tam sayi (ornek: " + default + ")") from None
 
 
 def bool_env(name: str, default: str = "false") -> bool:
@@ -111,7 +143,7 @@ FAST_CYCLE_SECONDS = 0.25
 
 
 def min_interval_suggestion(shortest_cycle_seconds: float) -> float:
-    """``UDAR_PULSE_MIN_INTERVAL_SECONDS`` önerisi: en kısa GERÇEK çevrimin yarısı.
+    """``ALCA_PULSE_MIN_INTERVAL_SECONDS`` önerisi: en kısa GERÇEK çevrimin yarısı.
 
     Yarısı 0,01'e aşağı yuvarlanır. Yarısı öndeğerin (0,20) altına düşüyorsa ve
     çevrim ``FAST_CYCLE_SECONDS``'tan uzunsa öndeğer kalır: süzgeç zaten ~0,22
@@ -151,7 +183,7 @@ class Config:
     gpio_bcm: int = 17
     pull_up: bool = False
     timeout: float = 5.0
-    queue_db: Path = Path("/var/lib/udar-pi-agent/machine_events.sqlite3")
+    queue_db: Path = Path(KUYRUK_DOSYASI)
     measurement_mode: str = "pulse"
     pulse_edge: str = "rising"
     poll_interval_seconds: float = 0.002
@@ -181,59 +213,61 @@ class Config:
 
 
 def load_config() -> Config:
-    crm_url = env("UDAR_CRM_URL")
-    token = env("UDAR_DEVICE_TOKEN")
+    crm_url = env("ALCA_CRM_URL")
+    token = env("ALCA_DEVICE_TOKEN")
     if not crm_url or not token:
-        raise SystemExit("UDAR_CRM_URL and UDAR_DEVICE_TOKEN are required in /etc/udar-pi-agent.env")
-    mode = env("UDAR_MEASUREMENT_MODE", "pulse").lower()
+        raise SystemExit(f"ALCA_CRM_URL and ALCA_DEVICE_TOKEN are required in {ENV_DOSYASI}")
+    mode = env("ALCA_MEASUREMENT_MODE", "pulse").lower()
     if mode not in {"pulse", "duration"}:
-        raise SystemExit("UDAR_MEASUREMENT_MODE must be pulse or duration")
-    pulse_edge = env("UDAR_PULSE_EDGE", "rising").lower()
+        raise SystemExit("ALCA_MEASUREMENT_MODE must be pulse or duration")
+    pulse_edge = env("ALCA_PULSE_EDGE", "rising").lower()
     if pulse_edge not in {"rising", "falling", "both"}:
-        raise SystemExit("UDAR_PULSE_EDGE must be rising, falling, or both")
-    unit = env("UDAR_DURATION_UNIT", "seconds").lower()
+        raise SystemExit("ALCA_PULSE_EDGE must be rising, falling, or both")
+    unit = env("ALCA_DURATION_UNIT", "seconds").lower()
     if unit not in {"seconds", "minutes"}:
-        raise SystemExit("UDAR_DURATION_UNIT must be seconds or minutes")
-    duration_active_level = env("UDAR_DURATION_ACTIVE_LEVEL", "high").lower()
+        raise SystemExit("ALCA_DURATION_UNIT must be seconds or minutes")
+    duration_active_level = env("ALCA_DURATION_ACTIVE_LEVEL", "high").lower()
     if duration_active_level not in {"high", "low"}:
-        raise SystemExit("UDAR_DURATION_ACTIVE_LEVEL must be high or low")
+        raise SystemExit("ALCA_DURATION_ACTIVE_LEVEL must be high or low")
     return Config(
         crm_url=crm_url,
         device_token=token,
-        gpio_bcm=int_env("UDAR_GPIO_BCM", "17"),
-        # UDAR_BOUNCE_SECONDS BİLEREK okunmaz. Temmuz 2026'dan (391b844) beri
+        gpio_bcm=int_env("ALCA_GPIO_BCM", "17"),
+        # ALCA_BOUNCE_SECONDS BİLEREK okunmaz. Temmuz 2026'dan (391b844) beri
         # kullanılmıyor: daha eski ajanda gpiozero Button'ın bounce_time'ıydı;
         # 391b844 sayımı PulseCycleDetector'a taşıyınca değer yalnız okunur
         # oldu, pine hiç verilmedi. Bozuk değeri ise ajanı açılışta
-        # çökertiyordu (21 Eylül). Süzgeç UDAR_PULSE_* ayarlarıdır. Eski
+        # çökertiyordu (21 Eylül). Süzgeç ALCA_PULSE_* ayarlarıdır. Eski
         # dosyada kalmışsa main() hatırlatır.
-        pull_up=bool_env("UDAR_PULL_UP"),
-        timeout=float_env("UDAR_HTTP_TIMEOUT", "5"),
-        queue_db=Path(env("UDAR_QUEUE_DB", "/var/lib/udar-pi-agent/machine_events.sqlite3")),
+        pull_up=bool_env("ALCA_PULL_UP"),
+        timeout=float_env("ALCA_HTTP_TIMEOUT", "5"),
+        # Yol verilmişse (eski anahtarla bile) ona saygı duyulur; verilmemişse
+        # gönderilmemiş kayıtları tutan eski kuyruk yeni klasör yokken kullanılır.
+        queue_db=Path(env("ALCA_QUEUE_DB", yeni_yoksa_eski(KUYRUK_DOSYASI, ESKI_KUYRUK_DOSYASI))),
         measurement_mode=mode,
         pulse_edge=pulse_edge,
-        poll_interval_seconds=float_env("UDAR_POLL_INTERVAL_SECONDS", "0.002"),
-        pulse_min_active_seconds=float_env("UDAR_PULSE_MIN_ACTIVE_SECONDS", "0.02"),
-        pulse_rearm_seconds=float_env("UDAR_PULSE_REARM_SECONDS", "0.20"),
-        pulse_max_active_seconds=float_env("UDAR_PULSE_MAX_ACTIVE_SECONDS", "10.0"),
-        pulse_min_interval_seconds=float_env("UDAR_PULSE_MIN_INTERVAL_SECONDS", "0.20"),
+        poll_interval_seconds=float_env("ALCA_POLL_INTERVAL_SECONDS", "0.002"),
+        pulse_min_active_seconds=float_env("ALCA_PULSE_MIN_ACTIVE_SECONDS", "0.02"),
+        pulse_rearm_seconds=float_env("ALCA_PULSE_REARM_SECONDS", "0.20"),
+        pulse_max_active_seconds=float_env("ALCA_PULSE_MAX_ACTIVE_SECONDS", "10.0"),
+        pulse_min_interval_seconds=float_env("ALCA_PULSE_MIN_INTERVAL_SECONDS", "0.20"),
         duration_unit=unit,
-        min_duration_seconds=float_env("UDAR_MIN_DURATION_SECONDS", "0.2"),
-        duration_start_stable_seconds=float_env("UDAR_DURATION_START_STABLE_SECONDS", "0.20"),
-        duration_stop_stable_seconds=float_env("UDAR_DURATION_STOP_STABLE_SECONDS", "0.20"),
-        duration_dropout_grace_seconds=float_env("UDAR_DURATION_DROPOUT_GRACE_SECONDS", "1.50"),
+        min_duration_seconds=float_env("ALCA_MIN_DURATION_SECONDS", "0.2"),
+        duration_start_stable_seconds=float_env("ALCA_DURATION_START_STABLE_SECONDS", "0.20"),
+        duration_stop_stable_seconds=float_env("ALCA_DURATION_STOP_STABLE_SECONDS", "0.20"),
+        duration_dropout_grace_seconds=float_env("ALCA_DURATION_DROPOUT_GRACE_SECONDS", "1.50"),
         duration_dropout_log_interval_seconds=float(
-            env("UDAR_DURATION_DROPOUT_LOG_INTERVAL_SECONDS", "30.0")
+            env("ALCA_DURATION_DROPOUT_LOG_INTERVAL_SECONDS", "30.0")
         ),
         duration_active_level=duration_active_level,
-        daily_reset=bool_env("UDAR_DAILY_RESET", "true"),
-        line_id=env("UDAR_LINE_ID"),
-        station_code=env("UDAR_STATION_CODE"),
-        operator_id=env("UDAR_OPERATOR_ID"),
-        note=env("UDAR_NOTE", "GPIO event"),
-        send_retry_base_seconds=float_env("UDAR_SEND_RETRY_BASE_SECONDS", "5"),
-        send_retry_validation_seconds=float_env("UDAR_SEND_RETRY_VALIDATION_SECONDS", "60"),
-        send_retry_max_seconds=float_env("UDAR_SEND_RETRY_MAX_SECONDS", "300"),
+        daily_reset=bool_env("ALCA_DAILY_RESET", "true"),
+        line_id=env("ALCA_LINE_ID"),
+        station_code=env("ALCA_STATION_CODE"),
+        operator_id=env("ALCA_OPERATOR_ID"),
+        note=env("ALCA_NOTE", "GPIO event"),
+        send_retry_base_seconds=float_env("ALCA_SEND_RETRY_BASE_SECONDS", "5"),
+        send_retry_validation_seconds=float_env("ALCA_SEND_RETRY_VALIDATION_SECONDS", "60"),
+        send_retry_max_seconds=float_env("ALCA_SEND_RETRY_MAX_SECONDS", "300"),
     )
 
 
@@ -296,8 +330,8 @@ def acquire_single_instance_lock(queue_db: Path):
             f"AJAN ZATEN CALISIYOR: {path} kilidi baska bir surecte"
             + (f" (pid {owner})" if owner else "")
             + ".\nAyni makineyi iki ajan okursa her vurus iki kez sayilir; bu kopya baslatilmadi.\n"
-            "Kontrol:  pgrep -af udar_pi_agent   (tek satir gorunmeli)\n"
-            "Servisi yeniden baslatmak icin:  sudo systemctl restart udar-pi-agent"
+            "Kontrol:  pgrep -af alca_pi_agent   (tek satir gorunmeli)\n"
+            "Servisi yeniden baslatmak icin:  sudo systemctl restart alca-pi-agent"
         ) from None
     handle.seek(0)
     handle.truncate()
@@ -318,7 +352,7 @@ class ClockSyncMonitor:
     vuruşun ``timestamp``'i yanlış olabilir. Ajan bunu her kayda
     ``clock_synced`` olarak yazar: true/false, bilinmiyorsa null.
 
-    Servis saatin eşitlenmesini BEKLEMEZ (bkz. udar-pi-agent.service): internet
+    Servis saatin eşitlenmesini BEKLEMEZ (bkz. alca-pi-agent.service): internet
     yokken de vuruşlar sayılıp kuyruğa yazılmalı. Kontrol GPIO döngüsünü de
     bekletmez; ayrı iş parçacığında yapılır, döngü yalnız son değeri okur.
 
@@ -889,7 +923,7 @@ def run_pulse_mode(
     active_level = pulse_active_level(config.pulse_edge)
     if config.pulse_edge == "both":
         print(
-            "NOT: UDAR_PULSE_EDGE=both, 'rising' ile ayni calisir: her tam 0->1->0 cevrimi 1 adet "
+            "NOT: ALCA_PULSE_EDGE=both, 'rising' ile ayni calisir: her tam 0->1->0 cevrimi 1 adet "
             "sayilir, her degisim ayri sayilmaz. Karisiklik olmasin diye 'rising' yazilabilir.",
             flush=True,
         )
@@ -1017,6 +1051,18 @@ def run_duration_mode(
     flush_dropout_log(time.monotonic(), force=True)
 
 
+def bounce_notu() -> str | None:
+    """Env dosyasında kalmış, artık okunmayan ayar için hatırlatma (iki adla da)."""
+    anahtar, value = ayar_degeri(os.environ, "ALCA_BOUNCE_SECONDS")
+    if not value:
+        return None
+    return (
+        f"NOT: {anahtar} Temmuz 2026'dan beri kullanilmiyor (daha eski ajanda "
+        "gpiozero Button bounce_time idi); ayar dosyasindan silinebilir. "
+        "Sinyal suzgeci ALCA_PULSE_* ayarlaridir."
+    )
+
+
 def main() -> int:
     config = load_config()
     # Kuyruğa ve pine dokunmadan ÖNCE: ikinci kopya hiçbir şey okumadan çıkar.
@@ -1036,17 +1082,13 @@ def main() -> int:
     sender.start()
 
     print(
-        f"UDAR Pi agent {AGENT_VERSION} started. mode={config.measurement_mode} BCM GPIO{config.gpio_bcm} signal, "
+        f"AL-CA ERP Pi agent {AGENT_VERSION} started. mode={config.measurement_mode} BCM GPIO{config.gpio_bcm} signal, "
         f"physical pin 9 GND/Terra. pull_up={str(config.pull_up).lower()} Endpoint={config.endpoint}",
         flush=True,
     )
-    if env("UDAR_BOUNCE_SECONDS"):
-        print(
-            "NOT: UDAR_BOUNCE_SECONDS Temmuz 2026'dan beri kullanilmiyor (daha eski ajanda "
-            "gpiozero Button bounce_time idi); ayar dosyasindan silinebilir. "
-            "Sinyal suzgeci UDAR_PULSE_* ayarlaridir.",
-            flush=True,
-        )
+    notu = bounce_notu()
+    if notu:
+        print(notu, flush=True)
     if config.measurement_mode == "duration":
         run_duration_mode(config, events, stop, clock)
     else:
